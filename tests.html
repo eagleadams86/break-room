@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 163;
+const EXPECTED = 165;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -727,7 +727,7 @@ function define() {
     ok(/MIT licensed/.test(PRIVACY_SRC), 'the authorship line');
     ok(!/href="privacy\.html"/.test(PRIVACY_SRC), 'you are standing on that page');
     ok(/anonymously/.test(PRIVACY_SRC), 'it says the sign-in is anonymous');
-    ok(/within about a day/.test(PRIVACY_SRC), 'and that a room is deleted');
+    ok(/When It Is Deleted/.test(PRIVACY_SRC) && /nobody can open it again/.test(PRIVACY_SRC), 'and when a room is deleted — and when it is not');
     ok(/<code>www\.gstatic\.com<\/code>/.test(PRIVACY_SRC), 'and names the one third-party script');
     ok(PRIVACY_SRC.indexOf('break-room') > -1 && PRIVACY_SRC.indexOf('github.com/eagleadams86/starter') === -1, 'its links are this repo’s');
   });
@@ -1956,6 +1956,34 @@ function define() {
     });
     ok(H.DEMO_PLAYERS.every((p) => p.nick.length <= H.NICK_MAX), 'no demo nickname is cut short by the cap');
     eq(H.initials('Priya (online)'), 'PR', 'and an avatar is letters, not a bracket');
+  });
+  t('the last drawer wipes the drawing when the game ends — once, and nobody else does', () => {
+    const calls = [];
+    const real = H.demoSim.clearStrokes;
+    H.demoSim.clearStrokes = async (r) => { calls.push(r); };
+    try {
+      H.__demo(true);
+      H.__setOffset(T0 + 2000 - Date.now());
+      H.__plantPlayers(drawPlayers());
+      const playing = Object.assign(drawing({ round: 4, drawer: U.d }), { phase: 'play' });
+      const over = Object.assign(drawing({ round: 4, drawer: U.d, step: 'results' }), { phase: 'results' });
+      H.__setMe(U.b);
+      W.brApp.onRoom(playing); W.brApp.onRoom(over);
+      eq(calls, [], 'Ben did not draw it, so Ben leaves it alone');
+      H.__setMe(U.d);
+      W.brApp.onRoom(playing); W.brApp.onRoom(over);
+      eq(calls, [4], 'Dee drew the last one, and wipes it');
+      W.brApp.onRoom(over);
+      eq(calls, [4], 'and only on the step into results, not on every snapshot after');
+    } finally { H.demoSim.clearStrokes = real; H.__demo(false); home(); }
+  });
+  t('no page promises a room is deleted within a day — the free plan has no clean-up to keep it', () => {
+    [['index.html', APP_SRC], ['privacy.html', PRIVACY_SRC]].forEach(([name, src]) => {
+      const text = visibleText(stripComments(src)).replace(/\s+/g, ' ');
+      ok(!/within (about )?a day/i.test(text), name + ' says “within a day”');
+    });
+    ok(/A room everyone simply closed the tab on is not deleted/.test(PRIVACY_SRC.replace(/\s+/g, ' ')),
+       'and the privacy page says plainly what stays');
   });
   t('the demo room keeps its own player when the cloud’s sign-in lands late', () => {
     try {

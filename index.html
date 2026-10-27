@@ -1027,8 +1027,8 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
         pick a nickname, then start a room or join one with its six-letter code.</p>
       <!-- The privacy claim the footer three inches below already makes, and the
            two must never disagree. -->
-      <p>Your nickname stays in this browser. A room, and everything said in it, is gone
-        within a day of the night it was opened.</p>
+      <p>Your nickname stays in this browser. Once a room ends nobody can open it again,
+        and pressing Leave deletes what you put in it.</p>
       <div class="joinrow">
         <div class="field">
           <label for="nickBox">Nickname</label>
@@ -1074,7 +1074,7 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
     <!-- Keeps its id because the cloud module rewrites this note's textContent
          to say whether a room is live. -->
     <p class="privacy" id="privacyNote">🔒 Your nickname stays in this browser. A room lives in the cloud
-      for the evening — anyone holding its code can see it — and is deleted within a day.</p>
+      for the evening — anyone holding its code can see it — and nobody can open it once it ends.</p>
     <p class="privacy privacy-links"><a href="privacy.html">Privacy policy</a> &middot;
       <a href="https://github.com/eagleadams86/break-room" target="_blank" rel="noopener noreferrer">How it works</a></p>
     <!-- Its own element, deliberately NOT part of #privacyNote: that note's
@@ -3211,6 +3211,14 @@ window.brApp = {
     /* A new game starts its rounds from 1 again, so an answer remembered from
        the last game must not read as this game's. */
     if (next.phase !== 'play' || !room || room.kind !== next.kind) myPick = { round: 0, v: null };
+    /* The game is over and this browser drew the last picture: wipe it, so a
+       drawing does not sit in the cloud after the game it belonged to. The
+       room still names this browser as the drawer at results, which is what
+       the rules ask of a strokes write. Once, on the step into results. */
+    if (next.phase === 'results' && next.kind === 'draw' && next.game.drawer === me && me
+        && room && room.phase === 'play') {
+      transport().clearStrokes(next.game.round).catch((e) => console.warn('final clear', e));
+    }
     room = next;
     render();
     hostTick();
@@ -3878,7 +3886,8 @@ $('recentWrap').addEventListener('click', (e) => {
    listener, so a dot added by a later render needs no wiring. */
 const HELP = {
   code: ['How a Room Code Works', `<p>A room is <strong>six letters or numbers</strong> from an alphabet with no O, 0, I or 1, so a code read out over a call cannot be misheard into a different room. Anyone holding the code can join — there is no password, and the code is deliberately not something that can be guessed or listed.</p>
-    <p>A room <strong>lives for six hours</strong> from the moment it is started; the host can extend it two hours at a time up to twelve. Once it has expired nobody can join or play, and the room and everything in it is <strong>deleted within a day</strong>.</p>`],
+    <p>A room <strong>lives for six hours</strong> from the moment it is started; the host can extend it two hours at a time up to twelve. Once it has expired <strong>nobody can open it again</strong> — not to join, play or look.</p>
+    <p>Pressing <strong>Leave</strong> deletes your own records, and the last person out deletes the room. A room that everyone just closes the tab on stays stored but unopenable, because the free plan this app runs on has no automatic clean-up.</p>`],
   online: ['What the Online Dot Means', `<p>Every player’s browser <strong>writes a heartbeat every 90 seconds</strong>, and the dot is green while that last write is <strong>under four minutes old</strong>. There is no instant “went offline” signal — a closed laptop simply stops writing, and the dot goes grey a few minutes later.</p>
     <p>The host’s dot matters most: if the host’s browser has been silent for <strong>three minutes</strong>, the player who has been in the room longest takes over running it, and the game carries on from where the room says it is.</p>`],
   scores: ['How Points Are Worked Out', `<p>A correct answer is worth <strong>100 points plus a speed bonus of up to 100</strong>: the bonus is the share of the question’s time that was still left when the answer arrived, so an answer at the halfway mark earns 150 in all. A wrong answer, or none, earns nothing and costs nothing.</p>
@@ -4166,8 +4175,8 @@ async function init() {
 function updateNote() {
   if (!privacyNote) return;
   privacyNote.textContent = user
-    ? '🔒 Signed in anonymously — this browser has a random id and nothing else. A room lives in the cloud for the evening and is deleted within a day.'
-    : '🔒 Your nickname stays in this browser. A room lives in the cloud for the evening — anyone holding its code can see it — and is deleted within a day.';
+    ? '🔒 Signed in anonymously — this browser has a random id and nothing else. A room lives in the cloud for the evening, and nobody can open it once it ends.'
+    : '🔒 Your nickname stays in this browser. A room lives in the cloud for the evening — anyone holding its code can see it — and nobody can open it once it ends.';
 }
 
 /* ── Listening to the room on screen ───────────────────────────────────────── */

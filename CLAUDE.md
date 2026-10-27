@@ -136,6 +136,12 @@ party game; don't "fix" it with a server, and don't let anything render the word
   take the demo host's seat away (found in M3; it was there since M1).
 - **The host's answers listener is dropped BEFORE a Leave hands the seat on** — the rules
   refuse it the moment the handoff lands, and it said so in the console.
+- **The last drawer's browser wipes the drawing on the step into results** (`onRoom`):
+  the room still names it as `drawer` there, which is what the strokes rule needs — after
+  Back to the Lobby nobody could. Without it a game's last picture stayed in the cloud.
+- **Nothing may promise a room is "deleted within a day"** — on Spark there is no TTL, so a
+  room everyone closed the tab on stays stored (unreadable: the rules refuse an expired
+  room). privacy.html's "When It Is Deleted" is the honest list; a test bans the old phrase.
 - **Demo nicknames are ≤ 20 characters** — `NICK_MAX` slices, and two of them used to lose
   their closing bracket. The demo's pace is read off "quick" / "slow" in the nickname.
 

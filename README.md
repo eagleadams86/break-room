@@ -3,7 +3,7 @@
 A room your team drops into beside the Teams or Zoom call you already have open. Pick a
 nickname, start a room or join one with its six-letter code, see who's around, and let the
 host run a round of trivia or a drawing game while everyone talks. No account, nothing to install, and
-everything in a room is deleted within a day.
+nobody can open a room once it has ended.
 
 **Live: https://eagleadams86.github.io/break-room/** · **Privacy:** [privacy.html](https://eagleadams86.github.io/break-room/privacy.html)
 
@@ -119,8 +119,10 @@ of all Google sign-in for a standing house with a cross-night leaderboard (6).
   the room is, because nothing lives only in the host's memory.
 - **Six hours, extendable to twelve.** A room expires six hours after it is started. The host
   can extend it two hours at a time from the lobby, up to twelve in all; the server refuses
-  anything longer. An expired room cannot be joined or played, and Firestore deletes it, with
-  every record in it, within about a day.
+  anything longer. An expired room cannot be joined, played or read — the rules refuse it.
+  Leave deletes your own records, the last one out deletes the room, and the last drawing is
+  wiped when a drawing game ends. A room everyone just closed the tab on is NOT deleted: the
+  project is on the free Spark plan, which has no time-to-live clean-up (see step 5 below).
 - **Online means "wrote in the last four minutes".** Every player's browser rewrites its
   presence record every 90 seconds, and that is what draws the dot. There is no video or
   voice: the call you are already on is the voice.

@@ -86,8 +86,8 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 
     <div class="card">
       <p><strong>There is no account.</strong> You pick a nickname for the evening; a room
-        lives in the cloud for a few hours so the people in it can see each other, and
-        everything in it is deleted within a day. Nothing identifies you across nights.</p>
+        lives in the cloud for a few hours so the people in it can see each other, and once
+        it has ended nobody can open it again. Nothing identifies you across nights.</p>
     </div>
 
     <h2>What Is Stored in This Browser</h2>
@@ -99,8 +99,9 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 
     <h2>What Is Stored in the Cloud, and for How Long</h2>
     <p>A room is a small set of documents in a Firebase (Google Cloud) database belonging to
-      this project. Each one carries an expiry time and is <strong>deleted automatically
-      within about a day</strong> of the room ending:</p>
+      this project. A room lasts six hours from when it is started (the host can extend it
+      to twelve), and <strong>once it has ended nobody can open it again</strong> — the
+      database's security rules refuse it, whatever the app or a browser asks for. It holds:</p>
     <ul>
       <li><strong>The room itself:</strong> which game is on, the question in play, the running
         scores for the evening, and — only if the host wrote one — a custom question pack.</li>
@@ -114,6 +115,17 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
         latest guess, overwritten by the next. A wrong guess is shown to the room until the
         turn ends; a right one never is. The drawer's word is sent only as a one-way
         fingerprint until the turn ends, so not even the host's screen shows it early.</li>
+    </ul>
+    <h2>When It Is Deleted</h2>
+    <ul>
+      <li><strong>Pressing Leave</strong> deletes your own player record and your answer.</li>
+      <li><strong>The last person to leave</strong> deletes the room itself.</li>
+      <li><strong>A drawing</strong> is wiped at the start of every turn, and again when the
+        game ends.</li>
+      <li><strong>A room everyone simply closed the tab on is not deleted.</strong> This
+        project uses Firebase's free plan, which has no automatic clean-up, so those few small
+        records stay in the database. Nobody can open them through the app once the room has
+        ended; the project's owner can see them in the Firebase console.</li>
     </ul>
     <p>A room is reachable by anyone who holds its six-letter code. The code is random and
       cannot be listed or guessed, but it is not a password: share it only with the people
