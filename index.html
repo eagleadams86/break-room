@@ -4760,7 +4760,9 @@ window.brApp = {
   onHouse: (id, raw) => {
     if (!HOUSE_RE.test(String(id))) return;
     if (raw && Number(raw.schema || 1) > SCHEMA) haltForNewerData(raw.schema);
+    const had = houses[id];
     houses[id] = raw ? normalizeHouse(raw, id) : null;
+    if (had && !raw && !demoOn && had.owner !== me) toast('The house “' + had.name + '” was deleted by the person who started it');
     if (houseOnScreen === id) { if (houses[id]) fillHouseDialog(); else $('houseDialog').close(); }
     render();
     houseTick();
@@ -6333,6 +6335,11 @@ function watchHouses(ids) {
     if (houseUnsubs[id]) return;
     houseUnsubs[id] = F.onSnapshot(houseRef(id), (s) => {
       if (s.metadata.hasPendingWrites) return;
+      /* The founder deleted it: only the founder's own list was changed (a
+         users doc is self-write only), so every other member's browser takes
+         the house off its OWN list when the SERVER says it is gone — never
+         on a cache miss, which an offline start would look like. */
+      if (!s.exists() && !s.metadata.fromCache) dropHouseFromUser(id).catch((e) => console.warn('drop deleted house', e));
       window.brApp.onHouse(id, s.exists() ? plain(s.data()) : null);
     }, (e) => {
       console.warn('house', e);

@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 238;
+const EXPECTED = 239;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2701,6 +2701,14 @@ function define() {
       eq(hbox.value, 'ABCD2345', 'a house code lands in its own box');
       eq(W.location.hash, '', 'and that link is cleared too');
     } finally { box.value = was; hbox.value = hwas; }
+  });
+  t('a deleted house leaves every member’s list, not only the founder’s', () => {
+    const mod = MOD();
+    /* 2026-10-27: Charles deleted a house and it lingered, "Loading…", on
+       his second account — users/{uid} is self-write, so only the member's
+       own browser can take it off. */
+    ok(/if \(!s\.exists\(\) && !s\.metadata\.fromCache\) dropHouseFromUser\(id\)/.test(mod), 'the listener drops it from the member’s own list, on the server’s word only');
+    ok(/if \(had && !raw && !demoOn && had\.owner !== me\) toast\(/.test(APP_SRC), 'and tells the members (not the founder, who pressed Delete) what happened');
   });
   t('a house never sends its members to a room that has ended', () => {
     const mod = MOD();

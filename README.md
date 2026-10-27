@@ -64,7 +64,8 @@ group that meets again:
   row — total points, nights scored, best night — counted once however many members are in
   the room (the tally only ever adds the difference since it last counted). Guests are not
   on it. Leave a house and your row stays, marked "left". The founder deletes the house from
-  the same window: press **Leaderboard**, then **Delete the House** at the bottom.
+  the same window: press **Leaderboard**, then **Delete the House** at the bottom. It then disappears from
+  every member's Houses card, with a note saying it was deleted.
 - **The demo room belongs to a demo house**, so the leaderboard can be seen with no account:
   the invented players have a few nights behind them and your points join them.
 - Signing out leaves the room as your account and rejoins it as a guest.

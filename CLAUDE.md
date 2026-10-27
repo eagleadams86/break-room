@@ -95,8 +95,11 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 238 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
-+2 shared picker / Make Host, +7 quit/pause/end below).
+**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 239 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house below). **A deleted house lingered on members' cards
+(fixed 2026-10-27):** `deleteHouse` can only edit the FOUNDER's `users` doc, so each member's
+`watchHouses` listener drops the house from its own list when the server (not the cache)
+says it is gone.
 **Quit, pause, end early (PR #3, 2026-10-27):** every game gets `game.gid` at start; a
 player's record gets optional `out` = the gid they QUIT (rules: `validPlayer` allows `out`,
 int 0..GID_MAX — published from the console by Charles; the Publish click is blocked for
