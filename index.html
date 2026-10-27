@@ -1121,6 +1121,30 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   </div>
 </dialog>
 
+<!-- ── Custom packs ──────────────────────────────────────────────────────────
+     The host's own questions, kept in this browser and copied onto the room
+     when a game starts from one. A pasted sheet, one question per line. -->
+<dialog id="packDialog" aria-labelledby="packTitle">
+  <h2 id="packTitle">Custom Packs</h2>
+  <p>Your own questions, kept in this browser (and in a backup). Paste one question per line as
+    <strong>question | a | b | c | d | correct</strong>, where <em>correct</em> is A–D or 1–4.
+    Lines that can’t be read are named rather than dropped.</p>
+  <div id="packList" style="margin-bottom:var(--sp-5)"></div>
+  <div class="field">
+    <label for="packName">Pack name</label>
+    <input type="text" id="packName" maxlength="40" autocomplete="off" placeholder="Friday quiz">
+  </div>
+  <div class="field">
+    <label for="packText">Questions</label>
+    <textarea id="packText" rows="8" spellcheck="false" placeholder="What is 2 + 2? | 3 | 4 | 5 | 6 | B"></textarea>
+  </div>
+  <p class="warn-line" id="packReport" role="status"></p>
+  <div class="row-actions">
+    <button type="button" id="packCloseBtn">Done</button>
+    <button type="button" class="primary" id="packSaveBtn">Save Pack</button>
+  </div>
+</dialog>
+
 <!-- The help window. ONE window for the whole app, filled from the HELP table
      by whichever info dot was pressed — that is the shape every sibling uses.
      It is not sized here — the two rules in the stylesheet let its own text set
@@ -1573,7 +1597,423 @@ const now = () => Date.now() + offset;
    drive a whole game with fake answers and a fake clock. Filled in from the
    trivia milestone on; empty here so the boundary already knows the shape. */
 const GAMES = {};
-/* M2-GAMES-SLOT */
+/* ═══════════════════════════ The trivia packs ════════════════════════════
+   Four packs of forty, embedded so a room needs no second fetch and a custom
+   pack (`local.packs`, copied onto the room) has the same shape. Every
+   question is [text, [four answers], index of the correct one]. Written for
+   this project — general knowledge, nothing from any employer — and kept
+   short, because a question is read on a phone while somebody talks. */
+const PACK_LIST = [
+['general', 'General Knowledge', [
+['What is the largest planet in our solar system?', ['Saturn', 'Jupiter', 'Neptune', 'Earth'], 1],
+['How many sides does a hexagon have?', ['Five', 'Six', 'Seven', 'Eight'], 1],
+['Which ocean is the largest?', ['Atlantic', 'Indian', 'Pacific', 'Arctic'], 2],
+['What is the capital of Canada?', ['Toronto', 'Vancouver', 'Montreal', 'Ottawa'], 3],
+['What is the chemical symbol for gold?', ['Go', 'Gd', 'Au', 'Ag'], 2],
+['How many bones are in the adult human body?', ['106', '206', '306', '406'], 1],
+['Which country has the most people?', ['China', 'United States', 'India', 'Indonesia'], 2],
+['What is the longest river in Africa?', ['Congo', 'Niger', 'Zambezi', 'Nile'], 3],
+['How many minutes are in a day?', ['1,240', '1,440', '1,640', '2,400'], 1],
+['Which gas do plants take in from the air?', ['Oxygen', 'Nitrogen', 'Carbon dioxide', 'Hydrogen'], 2],
+['What is the smallest prime number?', ['0', '1', '2', '3'], 2],
+['Which continent is Brazil on?', ['Africa', 'South America', 'Europe', 'Asia'], 1],
+['What is the hardest natural substance?', ['Quartz', 'Steel', 'Diamond', 'Granite'], 2],
+['How many strings does a standard guitar have?', ['Four', 'Five', 'Six', 'Seven'], 2],
+['What is the boiling point of water at sea level, in Celsius?', ['90', '100', '110', '120'], 1],
+['Which language has the most native speakers?', ['English', 'Spanish', 'Mandarin Chinese', 'Hindi'], 2],
+['What is the tallest mountain on Earth?', ['K2', 'Kilimanjaro', 'Mont Blanc', 'Everest'], 3],
+['How many players are on a soccer team on the field?', ['Nine', 'Ten', 'Eleven', 'Twelve'], 2],
+['What is the currency of Japan?', ['Yuan', 'Won', 'Yen', 'Ringgit'], 2],
+['Which planet is known as the Red Planet?', ['Venus', 'Mars', 'Mercury', 'Jupiter'], 1],
+['How many continents are there?', ['Five', 'Six', 'Seven', 'Eight'], 2],
+['What is the largest mammal?', ['African elephant', 'Blue whale', 'Giraffe', 'Hippopotamus'], 1],
+['What is the square root of 144?', ['10', '11', '12', '14'], 2],
+['Which country gifted the Statue of Liberty to the United States?', ['Spain', 'Britain', 'France', 'Italy'], 2],
+['What is the main ingredient in guacamole?', ['Tomato', 'Avocado', 'Pepper', 'Lime'], 1],
+['How many hearts does an octopus have?', ['One', 'Two', 'Three', 'Four'], 2],
+['Which is the smallest country in the world?', ['Monaco', 'Vatican City', 'San Marino', 'Liechtenstein'], 1],
+['What is the freezing point of water in Fahrenheit?', ['0', '32', '100', '212'], 1],
+['Which element has the atomic number 1?', ['Helium', 'Oxygen', 'Hydrogen', 'Carbon'], 2],
+['How many degrees are in a right angle?', ['45', '90', '180', '360'], 1],
+['What is the capital of Australia?', ['Sydney', 'Melbourne', 'Canberra', 'Perth'], 2],
+['Which bird is the largest living bird?', ['Emu', 'Ostrich', 'Albatross', 'Condor'], 1],
+['What is the largest desert in the world?', ['Sahara', 'Gobi', 'Antarctic', 'Arabian'], 2],
+['How many teeth does an adult human usually have?', ['28', '30', '32', '36'], 2],
+['What does DNA stand for?', ['Deoxyribonucleic acid', 'Dinucleic acid', 'Deoxyribose nitrate', 'Double nucleic array'], 0],
+['Which metal is liquid at room temperature?', ['Lead', 'Mercury', 'Tin', 'Zinc'], 1],
+['How many time zones does Russia span?', ['Five', 'Seven', 'Nine', 'Eleven'], 3],
+['What is the largest organ of the human body?', ['Liver', 'Brain', 'Skin', 'Lungs'], 2],
+['Which is the longest bone in the human body?', ['Tibia', 'Femur', 'Humerus', 'Spine'], 1],
+['What is 15% of 200?', ['15', '20', '30', '40'], 2],
+]],
+['office', 'Office & Tech', [
+['What does CPU stand for?', ['Central Processing Unit', 'Computer Power Unit', 'Core Program Utility', 'Central Program Unit'], 0],
+['Which key combination copies text on a Windows PC?', ['Ctrl+X', 'Ctrl+V', 'Ctrl+C', 'Ctrl+Z'], 2],
+['What does "www" stand for in a web address?', ['World Wide Web', 'Web World Wide', 'Wide World Web', 'World Web Wide'], 0],
+['Which company makes the Excel spreadsheet program?', ['Apple', 'Google', 'Microsoft', 'Oracle'], 2],
+['What does HTML stand for?', ['Hyper Transfer Markup Language', 'HyperText Markup Language', 'High Text Machine Language', 'Home Tool Markup Language'], 1],
+['In a spreadsheet, what does the SUM function do?', ['Counts cells', 'Adds values', 'Finds the average', 'Sorts rows'], 1],
+['What does "BCC" mean on an email?', ['Blind carbon copy', 'Back-channel copy', 'Business contact copy', 'Bulk copy'], 0],
+['How many bits are in a byte?', ['Four', 'Eight', 'Sixteen', 'Thirty-two'], 1],
+['Which company developed the Android operating system?', ['Apple', 'Microsoft', 'Google', 'Samsung'], 2],
+['What does PDF stand for?', ['Portable Document Format', 'Printed Data File', 'Public Document File', 'Personal Data Format'], 0],
+['Which symbol begins every formula in Excel?', ['#', '@', '=', '$'], 2],
+['What does "RSVP" ask you to do?', ['Reply', 'Reschedule', 'Reserve a seat', 'Read carefully'], 0],
+['What is the name of the Linux mascot?', ['A penguin', 'A fox', 'A gecko', 'A whale'], 0],
+['Which key combination undoes the last action in most programs?', ['Ctrl+U', 'Ctrl+Z', 'Ctrl+R', 'Ctrl+N'], 1],
+['What does "CC" stand for on an email?', ['Current copy', 'Carbon copy', 'Courtesy copy', 'Closed copy'], 1],
+['Which company makes the iPhone?', ['Google', 'Samsung', 'Apple', 'Nokia'], 2],
+['What does "FAQ" stand for?', ['Fast Access Query', 'Frequently Asked Questions', 'File Attribute Quota', 'Formal Answer Queue'], 1],
+['What is a "cookie" on a website?', ['A small data file stored by the browser', 'A type of advert', 'A security certificate', 'A spam filter'], 0],
+['Which was the first widely used web browser with images?', ['Mosaic', 'Netscape', 'Internet Explorer', 'Opera'], 0],
+['What does "USB" stand for?', ['Universal Serial Bus', 'United System Board', 'Universal System Backup', 'Unified Serial Band'], 0],
+['Which programming language shares its name with a coffee?', ['Python', 'Ruby', 'Java', 'Swift'], 2],
+['What does the "@" symbol separate in an email address?', ['First and last name', 'User and domain', 'Subject and body', 'Sender and date'], 1],
+['What does "GIF" stand for?', ['Graphics Interchange Format', 'General Image File', 'Graphic Information Form', 'Generated Image Frame'], 0],
+['Which key combination saves a file in most programs?', ['Ctrl+P', 'Ctrl+S', 'Ctrl+F', 'Ctrl+O'], 1],
+['What does "VPN" stand for?', ['Virtual Private Network', 'Verified Public Node', 'Virtual Personal Number', 'Variable Port Network'], 0],
+['Which company owns the video platform YouTube?', ['Meta', 'Amazon', 'Google', 'Microsoft'], 2],
+['What does "Wi-Fi" let a device do?', ['Connect to a network without a cable', 'Charge wirelessly', 'Print remotely', 'Encrypt files'], 0],
+['What does the "Reply all" button do?', ['Replies to the sender only', 'Replies to everyone on the email', 'Forwards the email', 'Archives the thread'], 1],
+['What is the name of the Microsoft Office assistant from the 1990s?', ['Clippy', 'Bob', 'Cortana', 'Max'], 0],
+['What does "RAM" stand for?', ['Read Access Memory', 'Random Access Memory', 'Rapid Application Memory', 'Remote Archive Memory'], 1],
+['Which file extension is a plain text file?', ['.txt', '.exe', '.jpg', '.mp3'], 0],
+['What does "SaaS" stand for?', ['Software as a Service', 'System as a Solution', 'Storage as a Service', 'Security as a System'], 0],
+['Which key combination pastes text on a Windows PC?', ['Ctrl+C', 'Ctrl+X', 'Ctrl+V', 'Ctrl+A'], 2],
+['What does "URL" stand for?', ['Uniform Resource Locator', 'Universal Reference Link', 'Unique Record Label', 'User Request Line'], 0],
+['What is "two-factor authentication"?', ['Signing in with a password plus a second check', 'Two passwords', 'A longer password', 'Signing in twice'], 0],
+['Which company makes the Chrome web browser?', ['Mozilla', 'Apple', 'Google', 'Microsoft'], 2],
+['What does "KPI" stand for?', ['Key Performance Indicator', 'Known Process Issue', 'Key Project Item', 'Knowledge Process Index'], 0],
+['What does a spreadsheet "pivot table" do?', ['Summarises data by category', 'Rotates the sheet', 'Draws a chart', 'Spell-checks cells'], 0],
+['How many characters was the original Twitter limit?', ['100', '140', '160', '280'], 1],
+['What does "OOO" mean in an email subject?', ['Out of office', 'On other orders', 'Over and out', 'Office of operations'], 0],
+]],
+['movies', 'Movies & Music', [
+['Which film features the line "I\'ll be back"?', ['RoboCop', 'The Terminator', 'Predator', 'Total Recall'], 1],
+['Who directed "Jaws"?', ['George Lucas', 'Steven Spielberg', 'Martin Scorsese', 'Ridley Scott'], 1],
+['Which band recorded "Abbey Road"?', ['The Rolling Stones', 'The Who', 'The Beatles', 'The Kinks'], 2],
+['Who sang "Like a Prayer"?', ['Cher', 'Madonna', 'Whitney Houston', 'Cyndi Lauper'], 1],
+['In "The Lion King", what is Simba\'s father called?', ['Scar', 'Mufasa', 'Rafiki', 'Zazu'], 1],
+['How many strings does a violin have?', ['Three', 'Four', 'Five', 'Six'], 1],
+['Which film won the first ever Academy Award for Best Picture?', ['Wings', 'Sunrise', 'Metropolis', 'The Jazz Singer'], 0],
+['Who played Jack in "Titanic"?', ['Brad Pitt', 'Matt Damon', 'Leonardo DiCaprio', 'Johnny Depp'], 2],
+['Which singer is known as the "Queen of Soul"?', ['Diana Ross', 'Aretha Franklin', 'Tina Turner', 'Etta James'], 1],
+['What is the name of the wizard school in "Harry Potter"?', ['Durmstrang', 'Beauxbatons', 'Hogwarts', 'Ilvermorny'], 2],
+['Which composer wrote "The Four Seasons"?', ['Bach', 'Mozart', 'Vivaldi', 'Beethoven'], 2],
+['Which film is set aboard the spaceship Nostromo?', ['Alien', 'Blade Runner', 'Star Wars', 'Moon'], 0],
+['Who is the lead singer of U2?', ['The Edge', 'Bono', 'Adam Clayton', 'Larry Mullen'], 1],
+['Which movie features a shark-hunting boat called the Orca?', ['The Abyss', 'Jaws', 'Deep Blue Sea', 'Life of Pi'], 1],
+['Which instrument has 88 keys?', ['Organ', 'Accordion', 'Piano', 'Harpsichord'], 2],
+['Who directed "Pulp Fiction"?', ['Quentin Tarantino', 'Martin Scorsese', 'David Fincher', 'Oliver Stone'], 0],
+['Which band sang "Bohemian Rhapsody"?', ['Led Zeppelin', 'Queen', 'Pink Floyd', 'Genesis'], 1],
+['In "Finding Nemo", what kind of fish is Nemo?', ['Angelfish', 'Clownfish', 'Blue tang', 'Pufferfish'], 1],
+['Who played the Joker in "The Dark Knight"?', ['Jack Nicholson', 'Jared Leto', 'Heath Ledger', 'Joaquin Phoenix'], 2],
+['Which singer released the album "21"?', ['Adele', 'Beyoncé', 'Rihanna', 'Taylor Swift'], 0],
+['Which film has a character named Forrest Gump?', ['Forrest Gump', 'Big', 'Cast Away', 'Philadelphia'], 0],
+['Who composed the music for "Star Wars"?', ['Hans Zimmer', 'John Williams', 'Danny Elfman', 'James Horner'], 1],
+['Which film features the song "My Heart Will Go On"?', ['Ghost', 'Titanic', 'The Bodyguard', 'Pretty Woman'], 1],
+['What is the highest-grossing film of all time, unadjusted?', ['Titanic', 'Avatar', 'Avengers: Endgame', 'Star Wars: The Force Awakens'], 1],
+['Which musician was known as "The King of Pop"?', ['Prince', 'Michael Jackson', 'Elvis Presley', 'Stevie Wonder'], 1],
+['Who played Neo in "The Matrix"?', ['Keanu Reeves', 'Brad Pitt', 'Will Smith', 'Tom Cruise'], 0],
+['Which band released "Nevermind" in 1991?', ['Pearl Jam', 'Soundgarden', 'Nirvana', 'Radiohead'], 2],
+['Which film features a hotel called the Overlook?', ['Psycho', 'The Shining', 'Misery', 'Carrie'], 1],
+['Who sang "Rolling in the Deep"?', ['Adele', 'Amy Winehouse', 'Duffy', 'Florence Welch'], 0],
+['What is the name of the toy cowboy in "Toy Story"?', ['Buzz', 'Woody', 'Rex', 'Slinky'], 1],
+['Which film features the quote "You can\'t handle the truth!"?', ['A Few Good Men', 'The Firm', 'Top Gun', 'Jerry Maguire'], 0],
+['Who directed "Inception"?', ['Christopher Nolan', 'Denis Villeneuve', 'James Cameron', 'Ridley Scott'], 0],
+['Which Beatle wrote "Yesterday"?', ['John Lennon', 'Paul McCartney', 'George Harrison', 'Ringo Starr'], 1],
+['Which film series features a character called Katniss Everdeen?', ['Divergent', 'The Hunger Games', 'Twilight', 'The Maze Runner'], 1],
+['Which singer is nicknamed "The Boss"?', ['Bob Dylan', 'Bruce Springsteen', 'Billy Joel', 'Tom Petty'], 1],
+['Which animated film features a snowman named Olaf?', ['Tangled', 'Moana', 'Frozen', 'Brave'], 2],
+['Who played Iron Man in the Marvel films?', ['Chris Evans', 'Robert Downey Jr.', 'Chris Hemsworth', 'Mark Ruffalo'], 1],
+['Which band is Mick Jagger the singer of?', ['The Who', 'The Beatles', 'The Rolling Stones', 'The Clash'], 2],
+['Which film features a DeLorean time machine?', ['Back to the Future', 'Bill & Ted', 'Looper', 'Primer'], 0],
+['Which musical features the song "Memory"?', ['Evita', 'Cats', 'Phantom of the Opera', 'Chicago'], 1],
+]],
+['decades', '80s to 2000s', [
+['Which console did Nintendo release in 1985 in North America?', ['Game Boy', 'NES', 'Super Nintendo', 'Nintendo 64'], 1],
+['Which wall came down in 1989?', ['The Great Wall', 'The Berlin Wall', 'Hadrian\'s Wall', 'The Western Wall'], 1],
+['Which TV show about six friends in New York began in 1994?', ['Seinfeld', 'Friends', 'Frasier', 'Cheers'], 1],
+['What was the name of the first web browser many home users saw in the 1990s?', ['Chrome', 'Firefox', 'Netscape Navigator', 'Safari'], 2],
+['Which toy was a craze in 1983, with adoption papers?', ['Cabbage Patch Kids', 'Furby', 'Tamagotchi', 'Beanie Babies'], 0],
+['Which band released "Thriller" in 1982?', ['Prince', 'Michael Jackson', 'Madonna', 'Wham!'], 1],
+['Which 1997 film starred Leonardo DiCaprio and Kate Winslet?', ['Romeo + Juliet', 'Titanic', 'The Beach', 'Catch Me If You Can'], 1],
+['Which pocket pet needed feeding on a tiny screen in 1997?', ['Furby', 'Tamagotchi', 'Pokémon', 'Giga Pet'], 1],
+['Which search engine launched in 1998?', ['Yahoo', 'AltaVista', 'Google', 'Bing'], 2],
+['Which cartoon family first appeared on TV in 1989?', ['The Flintstones', 'The Simpsons', 'Family Guy', 'The Jetsons'], 1],
+['Which portable music player did Apple launch in 2001?', ['iPhone', 'iPod', 'iMac', 'iPad'], 1],
+['Which film about a boy and an alien came out in 1982?', ['Close Encounters', 'E.T.', 'Flight of the Navigator', 'Explorers'], 1],
+['Which video game, released in 1985, has a plumber named Mario?', ['Donkey Kong', 'Super Mario Bros.', 'Mario Kart', 'Mario Party'], 1],
+['What year did the first iPhone go on sale?', ['2005', '2006', '2007', '2008'], 2],
+['Which boy band sang "I Want It That Way" in 1999?', ['NSYNC', 'Backstreet Boys', 'Boyz II Men', 'Westlife'], 1],
+['Which 1980s show had a talking car called KITT?', ['Knight Rider', 'The A-Team', 'Airwolf', 'MacGyver'], 0],
+['Which social network launched in 2004?', ['MySpace', 'Twitter', 'Facebook', 'LinkedIn'], 2],
+['Which movie trilogy about a ring finished in 2003?', ['Harry Potter', 'The Lord of the Rings', 'The Matrix', 'Star Wars prequels'], 1],
+['What was the big computer worry as 1999 turned into 2000?', ['Y2K', 'The Millennium Worm', 'Dot-com crash', 'Melissa virus'], 0],
+['Which 1986 film starred Tom Cruise as a Navy pilot?', ['Days of Thunder', 'Top Gun', 'Cocktail', 'Risky Business'], 1],
+['Which dance craze song by Los del Río was everywhere in 1996?', ['Mambo No. 5', 'Macarena', 'Cotton Eye Joe', 'Vogue'], 1],
+['Which TV show featured a lifeguard played by David Hasselhoff?', ['Magnum P.I.', 'Baywatch', 'Miami Vice', 'Hawaii Five-O'], 1],
+['Which music channel launched in 1981?', ['VH1', 'MTV', 'BET', 'CMT'], 1],
+['Which game console did Sony launch in 1994 in Japan?', ['PlayStation', 'Sega Saturn', 'Dreamcast', 'Xbox'], 0],
+['Which 1993 film brought dinosaurs back to life?', ['The Lost World', 'Jurassic Park', 'Godzilla', 'Dinosaur'], 1],
+['Which animated film about a clownfish came out in 2003?', ['Shark Tale', 'Finding Nemo', 'The Little Mermaid', 'Ponyo'], 1],
+['Which 1985 concert raised money for famine relief?', ['Woodstock', 'Live Aid', 'Farm Aid', 'Band Aid'], 1],
+['Which TV show set in Sunnydale had a vampire slayer?', ['Charmed', 'Buffy the Vampire Slayer', 'Angel', 'Supernatural'], 1],
+['Which 2001 film introduced a green ogre named Shrek?', ['Shrek', 'Monsters, Inc.', 'Ice Age', 'Madagascar'], 0],
+['Which Rubik puzzle sold in the millions in the early 1980s?', ['Rubik\'s Snake', 'Rubik\'s Cube', 'Rubik\'s Magic', 'Rubik\'s Clock'], 1],
+['Which 1990s TV show was set in the fictional town of Twin Peaks?', ['Northern Exposure', 'Twin Peaks', 'The X-Files', 'Picket Fences'], 1],
+['Which 1984 film had a team catching ghosts in New York?', ['Gremlins', 'Ghostbusters', 'Beetlejuice', 'Poltergeist'], 1],
+['Which pop star released "...Baby One More Time" in 1998?', ['Christina Aguilera', 'Britney Spears', 'Jessica Simpson', 'Mandy Moore'], 1],
+['Which video-sharing site launched in 2005?', ['Vimeo', 'YouTube', 'Dailymotion', 'Twitch'], 1],
+['Which hand-held gaming device did Nintendo release in 1989?', ['Game Gear', 'Game Boy', 'Lynx', 'Virtual Boy'], 1],
+['Which 1999 film asked whether reality was a simulation?', ['The Thirteenth Floor', 'The Matrix', 'eXistenZ', 'Dark City'], 1],
+['Which British band released "Wonderwall" in 1995?', ['Blur', 'Oasis', 'Pulp', 'Radiohead'], 1],
+['Which 1980s sitcom was set in a Boston bar where everybody knows your name?', ['Cheers', 'Frasier', 'Taxi', 'Wings'], 0],
+['Which 2000s TV show was about a paper company in Scranton?', ['Parks and Recreation', 'The Office', '30 Rock', 'Arrested Development'], 1],
+['Which 1990 film featured a boy left home alone at Christmas?', ['Home Alone', 'Elf', 'Jingle All the Way', 'The Santa Clause'], 0],
+]],
+];
+/* The packs, in the shape a room carries: { id, name, qs: [{q, a, c}] }. */
+const PACKS = PACK_LIST.map((p) => ({ id: p[0], name: p[1], qs: p[2].map((q) => ({ q: q[0], a: q[1], c: q[2] })) }));
+const CUSTOM_PACK_ID = 'custom';
+/* Which pack a room is playing from: an embedded one by id, or the one the
+   host copied onto the room document. Null if neither — a reload on a build
+   that has lost a pack id must draw "question missing", not throw. */
+function packFor(r) {
+  if (!r || !r.game) return null;
+  if (r.game.packId === CUSTOM_PACK_ID) return r.pack || null;
+  return PACKS.find((p) => p.id === r.game.packId) || null;
+}
+function questionAt(r, qi) {
+  const pack = packFor(r);
+  if (!pack || !Array.isArray(r.game.order)) return null;
+  const q = pack.qs[r.game.order[qi]];
+  return q && Array.isArray(q.a) && q.a.length === 4 ? q : null;
+}
+/* A Fisher–Yates shuffle from crypto, so the question order is the host's
+   browser's and nobody's to predict. Pure in the sense that matters: it
+   returns a new array. */
+function shuffled(n) {
+  const out = Array.from({ length: n }, (_, i) => i);
+  const rnd = new Uint32Array(n);
+  crypto.getRandomValues(rnd);
+  for (let i = n - 1; i > 0; i--) {
+    const j = rnd[i] % (i + 1);
+    const t = out[i]; out[i] = out[j]; out[j] = t;
+  }
+  return out;
+}
+
+/* ── The custom-pack parser ─────────────────────────────────────────────────
+   One question per line: `question | a | b | c | d | correct`, where correct
+   is a letter A–D or a number 1–4. Blank lines and lines opening with # are
+   skipped. PURE, and it reports by LINE NUMBER what it could not read, so a
+   pasted sheet with one bad row says which one rather than silently dropping
+   it. The caps are normalizePack's; anything over them is sliced, and a
+   question with fewer than four answers is a line in the report. */
+function parsePack(name, text) {
+  const bad = [];
+  const qs = [];
+  String(text || '').split(/\r?\n/).forEach((line, i) => {
+    const raw = line.trim();
+    if (!raw || raw[0] === '#') return;
+    const parts = raw.split('|').map((s) => s.trim());
+    if (parts.length !== 6) { bad.push({ line: i + 1, why: parts.length < 6 ? 'needs 6 parts separated by |' : 'has more than 6 parts — a | inside an answer?' }); return; }
+    const key = parts[5].toUpperCase();
+    const c = 'ABCD'.indexOf(key) !== -1 ? 'ABCD'.indexOf(key) : '1234'.indexOf(key) !== -1 ? '1234'.indexOf(key) : -1;
+    if (c === -1) { bad.push({ line: i + 1, why: 'the last part must be A–D or 1–4' }); return; }
+    if (!parts[0] || parts.slice(1, 5).some((a) => !a)) { bad.push({ line: i + 1, why: 'the question and all four answers must have text' }); return; }
+    qs.push({ q: parts[0], a: parts.slice(1, 5), c: c });
+  });
+  const over = Math.max(0, qs.length - PACK_QS_MAX);
+  const pack = normalizePack({ name: name, qs: qs });
+  return { pack: pack, bad: bad, over: over };
+}
+
+/* ═══════════════════════════════ Trivia ══════════════════════════════════
+   The first game, and the shape the next three follow. The host asks a
+   question for `secs` seconds, reveals for five, and moves on; `step()` is
+   the only thing that moves it and is PURE — pinned by the suite through a
+   whole game with fake answers.
+
+   Scoring: 100 for a correct answer plus floor(100 × remaining / stepMs) as
+   a speed bonus, where remaining is worked out from the answer's SERVER
+   timestamp against the question's SERVER timestamp — never a client clock.
+   An answer for any round but the current one is ignored; a player with no
+   entry in `scores` is on nought. */
+const REVEAL_MS = 5000;
+GAMES.trivia = {
+  id: 'trivia', name: 'Trivia', min: 1, max: PLAYERS_MAX,
+  normalize(g, base) {
+    const gained = {};
+    if (g.gained && typeof g.gained === 'object')
+      Object.keys(g.gained).filter((k) => ID_RE.test(k)).slice(0, PLAYERS_MAX).forEach((k) => { gained[k] = int(g.gained[k], 0, 1000, 0); });
+    const counts = Array.isArray(g.counts) && g.counts.length === 4 ? g.counts.map((n) => int(n, 0, PLAYERS_MAX, 0)) : null;
+    return Object.assign(base, {
+      packId: String(g.packId == null ? '' : g.packId).slice(0, PACK_NAME_MAX),
+      order: (Array.isArray(g.order) ? g.order : []).slice(0, PACK_QS_MAX).map((n) => int(n, 0, PACK_QS_MAX - 1, 0)),
+      qi: int(g.qi, 0, PACK_QS_MAX, 0),
+      n: int(g.n, 0, PACK_QS_MAX, 0),
+      secs: int(g.secs, 5, 120, 20),
+      correct: g.correct == null ? null : int(g.correct, 0, 3, 0),
+      counts: counts,
+      gained: g.gained == null ? null : gained,
+    });
+  },
+  /* The host's choices in the lobby: a pack, how many questions, how long. */
+  options(pk) {
+    const packs = PACKS.map((p) => ({ id: p.id, name: p.name + ' (' + p.qs.length + ')' }))
+      .concat(local.packs.map((p, i) => ({ id: CUSTOM_PACK_ID + ':' + i, name: p.name + ' (' + p.qs.length + ', yours)' })));
+    const cur = packs.some((p) => p.id === pk.pack) ? pk.pack : packs[0].id;
+    return '<div class="field"><label for="pickPack">Pack</label><select id="pickPack">'
+      + packs.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('')
+      + '</select></div>'
+      + '<div class="field"><label for="pickN">Questions</label><select id="pickN">'
+      + ['10', '20', '40'].map((n) => '<option value="' + n + '"' + (n === pk.n ? ' selected' : '') + '>' + n + '</option>').join('')
+      + '</select></div>'
+      + '<div class="field"><label for="pickSecs">Seconds per question</label><select id="pickSecs">'
+      + ['15', '20', '30'].map((n) => '<option value="' + n + '"' + (n === pk.secs ? ' selected' : '') + '>' + n + '</option>').join('')
+      + '</select></div>';
+  },
+  extra() { return '<button type="button" id="packEditBtn">Custom Packs…</button>'; },
+  setup(pk, list, loc) {
+    let pack = null, packId = pk.pack;
+    if (String(pk.pack).indexOf(CUSTOM_PACK_ID + ':') === 0) {
+      pack = loc.packs[Number(pk.pack.split(':')[1])] || null;
+      packId = CUSTOM_PACK_ID;
+      if (!pack) return { error: 'That custom pack is gone — pick another.' };
+    } else {
+      pack = PACKS.find((p) => p.id === pk.pack) || PACKS[0];
+      packId = pack.id;
+    }
+    if (!pack.qs.length) return { error: 'That pack has no questions in it.' };
+    const n = Math.min(int(pk.n, 1, PACK_QS_MAX, 20), pack.qs.length);
+    const order = shuffled(pack.qs.length).slice(0, n);
+    const secs = int(pk.secs, 5, 120, 20);
+    return {
+      game: { step: 'ask', stepAt: 'now', stepMs: secs * 1000, round: 1, qi: 0, order: order, n: n, secs: secs,
+              packId: packId, correct: null, counts: null, gained: null },
+      pack: packId === CUSTOM_PACK_ID ? { name: pack.name, qs: pack.qs } : null,
+    };
+  },
+  /* THE engine. Returns the patch the host should push, or null. */
+  step(r, ctx) {
+    const g = r.game;
+    const t = ctx.now;
+    if (r.phase !== 'play' || r.kind !== 'trivia') return null;
+    if (g.step === 'ask') {
+      const online = ctx.players.filter((p) => isOnline(p, t));
+      const live = ctx.answers.filter((a) => a.r === g.round);
+      const everyone = online.length > 0 && online.every((p) => live.some((a) => a.uid === p.uid));
+      const timeUp = g.stepAt > 0 && t >= g.stepAt + g.stepMs;
+      if (!everyone && !timeUp) return null;
+      const q = questionAt(r, g.qi);
+      const correct = q ? q.c : null;
+      const counts = [0, 0, 0, 0];
+      const gained = {};
+      const scores = Object.assign({}, r.scores);
+      live.forEach((a) => {
+        const v = typeof a.v === 'number' ? a.v : -1;
+        if (v >= 0 && v <= 3) counts[v] += 1;
+        if (correct !== null && v === correct) {
+          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - (a.at - g.stepAt)));
+          const pts = 100 + Math.floor(100 * remaining / g.stepMs);
+          gained[a.uid] = pts;
+          scores[a.uid] = (scores[a.uid] || 0) + pts;
+        }
+      });
+      return { scores: scores,
+               game: Object.assign({}, g, { step: 'reveal', stepAt: 'now', stepMs: REVEAL_MS, correct: correct, counts: counts, gained: gained }) };
+    }
+    if (g.step === 'reveal') {
+      if (!(g.stepAt > 0 && t >= g.stepAt + g.stepMs)) return null;
+      if (g.qi + 1 < g.order.length) {
+        return { game: Object.assign({}, g, { step: 'ask', stepAt: 'now', stepMs: g.secs * 1000, qi: g.qi + 1, round: g.round + 1,
+                                              correct: null, counts: null, gained: null }) };
+      }
+      return { phase: 'results', game: Object.assign({}, g, { step: 'results', stepAt: 'now', stepMs: 0 }) };
+    }
+    return null;
+  },
+  encode(input) { const n = Number(input); return Number.isInteger(n) && n >= 0 && n <= 3 ? n : null; },
+  /* What one player sees. `myPick` is this browser's own answer for the
+     round, kept in memory so the button stays marked until the reveal; a
+     reload reads "answered" off the player record's ansR instead. */
+  view(r, who, list, ans, t) {
+    const g = r.game;
+    const q = questionAt(r, g.qi);
+    const mine = list.find((p) => p.uid === who);
+    const answered = (myPick.round === g.round ? myPick.v : null);
+    const haveAnswered = answered !== null || !!(mine && mine.ansR === g.round);
+    const online = list.filter((p) => isOnline(p, t));
+    const done = online.filter((p) => p.ansR === g.round).length;
+    const reveal = g.step === 'reveal';
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    let body;
+    if (!q) {
+      body = '<p class="lede">This question is missing — the pack this room is playing from is not in this copy of the app.</p>';
+    } else {
+      body = '<p class="qtext">' + esc(q.q) + '</p><div class="answers' + (reveal ? ' revealed' : '') + '">'
+        + q.a.map((a, i) => {
+            let cls = '', tag = '';
+            if (reveal) {
+              if (i === g.correct) { cls = ' right'; tag = 'correct'; }
+              else if (answered === i) { cls = ' wrong'; tag = 'yours'; }
+              if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' answer' : ' answers');
+            } else if (answered === i) { cls = ' mine'; tag = 'your answer'; }
+            return '<button type="button" data-ans="' + i + '" class="' + cls.trim() + '"' + ((reveal || haveAnswered) ? ' disabled' : '') + '>'
+              + '<span>' + esc(a) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+          }).join('') + '</div>';
+    }
+    let line;
+    if (reveal) {
+      const got = g.gained && g.gained[who];
+      line = got ? '<strong class="gain">+' + got + '</strong> for you · next question in <span class="countdown" id="qLeft">' + fmtSecs(left) + '</span>'
+                 : (answered !== null || haveAnswered ? 'No points this time' : 'You didn’t answer') + ' · next question in <span class="countdown" id="qLeft">' + fmtSecs(left) + '</span>';
+    } else {
+      line = '<span class="countdown' + (left < 5000 ? ' low' : '') + '" id="qLeft">' + fmtSecs(left) + '</span> seconds · '
+        + done + ' of ' + online.length + ' answered';
+    }
+    return '<div class="card"><h2>Question ' + (g.qi + 1) + ' of ' + g.order.length + '<span class="spacer"></span><span class="pill">'
+      + esc((packFor(r) || { name: 'Trivia' }).name) + '</span></h2>'
+      + '<div class="meter"><span>' + line + '</span></div>' + body + '</div>';
+  },
+  tick(r, t) {
+    const el = $('qLeft');
+    if (!el) return;
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    el.textContent = fmtSecs(left);
+    el.classList.toggle('low', g.step === 'ask' && left < 5000);
+  },
+  onClick(btn, r, who) {
+    const v = btn.getAttribute('data-ans');
+    if (v === null || r.game.step !== 'ask' || btn.disabled) return;
+    const enc = GAMES.trivia.encode(v);
+    if (enc === null) return;
+    if (myPick.round === r.game.round) return;
+    myPick = { round: r.game.round, v: enc };
+    noteWrite();
+    transport().answer(r.game.round, enc).catch((e) => { console.warn('answer', e); myPick = { round: 0, v: null }; toast(describeCloudError(e)); });
+    render();
+  },
+  results(r, who, list) {
+    const g = r.game;
+    return '<p class="lede">' + g.order.length + ' questions from <strong>' + esc((packFor(r) || { name: 'the pack' }).name) + '</strong>. '
+      + 'Points carry on to the next game — the scoreboard below is the night so far.</p>';
+  },
+  /* The demo's invented players. "Answers fast" is right and quick; "answers
+     slowly" is right half the time; the rest are right most of the time. */
+  demoAnswer(sr, p) {
+    const q = questionAt({ game: sr.game, pack: sr.pack }, sr.game.qi);
+    if (!q) return 0;
+    const chance = /fast/.test(p.nick) ? 1 : /slowly/.test(p.nick) ? 0.5 : 0.7;
+    if (Math.random() < chance) return q.c;
+    return (q.c + 1 + Math.floor(Math.random() * 3)) % 4;
+  },
+};
+let myPick = { round: 0, v: null };
+
 
 /* ═══════════════════════════════ Rendering ═══════════════════════════════ */
 
@@ -1904,6 +2344,9 @@ window.brApp = {
     const next = normalizeRoom(raw);
     if (!next) { leaveRoom('The room could not be read'); return; }
     if (next.expiresAt <= now()) { leaveRoom('That room has ended'); return; }
+    /* A new game starts its rounds from 1 again, so an answer remembered from
+       the last game must not read as this game's. */
+    if (next.phase !== 'play' || !room || room.kind !== next.kind) myPick = { round: 0, v: null };
     room = next;
     render();
     hostTick();
@@ -2063,6 +2506,7 @@ const demoSim = (() => {
       return rev;
     },
     answer: async (r, v) => {
+      if (!simRoom || !simPlayers[DEMO_ME]) return;
       simAnswers[DEMO_ME] = { r: r, v: v, at: Date.now() };
       simPlayers[DEMO_ME].ansR = r; simPlayers[DEMO_ME].seenAt = Date.now();
       emit();
@@ -2354,7 +2798,67 @@ $('roomView').addEventListener('click', (e) => {
   const g = GAMES[room.kind];
   if (g && g.onClick) g.onClick(b, room, me);
 });
-/* M2-WIRING-SLOT */
+/* ── The custom-pack window ─────────────────────────────────────────────────
+   Opened from the lobby's picker. The list of packs this browser holds, each
+   with a delete; a name and a textarea for a pasted sheet; and a report that
+   names the lines it could not read. Saved as you go: a pack lands in
+   local.packs the moment it parses. */
+function renderPackList() {
+  const wrap = $('packList');
+  wrap.innerHTML = local.packs.length
+    ? '<ul class="roster">' + local.packs.map((p, i) =>
+        '<li><span class="who">' + esc(p.name) + ' <span class="you">(' + p.qs.length + (p.qs.length === 1 ? ' question' : ' questions') + ')</span></span>'
+        + '<button type="button" class="icon-btn danger" data-delpack="' + i + '" aria-label="Delete ' + esc(p.name) + '"><span aria-hidden="true">×</span></button></li>').join('')
+      + '</ul>'
+    : '<p class="hint" style="margin:0">No custom packs yet.</p>';
+}
+function openPacks() {
+  renderPackList();
+  $('packName').value = '';
+  $('packText').value = '';
+  $('packReport').textContent = '';
+  openModal($('packDialog'));
+}
+$('packList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-delpack]');
+  if (!b) return;
+  const i = Number(b.getAttribute('data-delpack'));
+  const p = local.packs[i];
+  if (!p) return;
+  if (!confirm('Delete the pack “' + p.name + '” (' + p.qs.length + ' questions)?\n\nThis cannot be undone. Take a backup first if you might want it.')) return;
+  local.packs.splice(i, 1);
+  save();
+  renderPackList();
+  if (room) render();
+  toast('Pack deleted');
+});
+$('packSaveBtn').addEventListener('click', () => {
+  const name = $('packName').value.trim().slice(0, PACK_NAME_MAX);
+  const report = $('packReport');
+  if (!name) { report.textContent = 'Give the pack a name.'; $('packName').focus(); return; }
+  const r = parsePack(name, $('packText').value);
+  if (!r.pack || !r.pack.qs.length) {
+    report.textContent = r.bad.length
+      ? 'Nothing could be read. Line ' + r.bad[0].line + ' ' + r.bad[0].why + (r.bad.length > 1 ? ', and ' + (r.bad.length - 1) + ' more.' : '.')
+      : 'Paste at least one line: question | a | b | c | d | correct letter.';
+    return;
+  }
+  if (local.packs.length >= PACKS_MAX) { report.textContent = 'This browser holds ' + PACKS_MAX + ' packs already — delete one first.'; return; }
+  local.packs.push(r.pack);
+  save();
+  renderPackList();
+  $('packName').value = ''; $('packText').value = '';
+  report.textContent = 'Saved ' + r.pack.qs.length + (r.pack.qs.length === 1 ? ' question' : ' questions') + ' as “' + r.pack.name + '”'
+    + (r.bad.length ? ' — skipped line' + (r.bad.length === 1 ? ' ' : 's ') + r.bad.map((b) => b.line).join(', ') + ' (' + r.bad[0].why + ').' : '.')
+    + (r.over ? ' The first ' + PACK_QS_MAX + ' were kept; ' + r.over + ' over the cap were left out.' : '');
+  if (room) render();
+});
+$('packCloseBtn').addEventListener('click', () => $('packDialog').close());
+closeOnBackdropClick($('packDialog'));
+$('roomView').addEventListener('click', (e) => {
+  if (e.target.closest('#packEditBtn')) openPacks();
+});
+
 function startGame() {
   pickState();
   const g = GAMES[pick.kind];
@@ -2569,6 +3073,8 @@ window.__brTestHooks = {
   parseJoinHash: parseJoinHash, joinLink: joinLink, fmtLeft: fmtLeft, initials: initials,
   demoSim: demoSim, DEMO_PLAYERS: DEMO_PLAYERS, DEMO_ME: DEMO_ME, __demo: (on) => { demoOn = !!on; }, __pick: () => pick,
   transport: transport, hostTick: hostTick,
+  PACKS: PACKS, PACK_LIST: PACK_LIST, parsePack: parsePack, packFor: packFor, questionAt: questionAt, shuffled: shuffled,
+  REVEAL_MS: REVEAL_MS, CUSTOM_PACK_ID: CUSTOM_PACK_ID, __myPick: () => myPick,
 };
 </script>
 

@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 111;
+const EXPECTED = 131;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -223,7 +223,13 @@ async function runAsync() {
     drawn['view:results'] = doc.getElementById('roomView').textContent.trim().length;
     H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'poker' }));
     drawn['view:unknown-game'] = doc.getElementById('roomView').textContent.trim().length;
-    /* M2-SMOKE-SLOT */
+    H.__setMe(U.b);
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'trivia', game: { step: 'ask', stepAt: T0, stepMs: 20000, round: 1, qi: 0, order: [3, 1, 2], n: 3, secs: 20, packId: 'general' } }));
+    drawn['view:play'] = doc.getElementById('roomView').textContent.trim().length;
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'trivia', game: { step: 'reveal', stepAt: T0, stepMs: 5000, round: 1, qi: 0, order: [3, 1, 2], n: 3, secs: 20, packId: 'general', correct: 3, counts: [1, 0, 0, 2], gained: { [U.b]: 150 } } }));
+    drawn['view:reveal'] = doc.getElementById('roomView').textContent.trim().length;
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'trivia', game: { step: 'ask', stepAt: T0, stepMs: 20000, round: 1, qi: 0, order: [0], n: 1, secs: 20, packId: 'nope' } }));
+    drawn['view:missing-pack'] = doc.getElementById('roomView').textContent.trim().length;
     H.__setMe(null);
     H.__plantRoom(null);
     const dialogs = [...doc.querySelectorAll('dialog')].filter((d) => d.id);
@@ -1297,7 +1303,256 @@ function define() {
     } finally { f.remove(); }
   });
 
-  /* M2-TESTS-SLOT */
+
+  group('the trivia packs');
+  t('four packs of forty, every question whole, nothing the boundary would slice', () => {
+    eq(H.PACKS.map((p) => p.id), ['general', 'office', 'movies', 'decades'], 'the four');
+    H.PACKS.forEach((p) => {
+      eq(p.qs.length, 40, p.id + ' has forty');
+      const seen = new Set();
+      p.qs.forEach((q, i) => {
+        ok(q.q && q.q.length <= H.Q_MAX, p.id + ' q' + i + ' text within the cap');
+        eq(q.a.length, 4, p.id + ' q' + i + ' has four answers');
+        ok(q.a.every((a) => a && a.length <= H.A_MAX), p.id + ' q' + i + ' answers within the cap');
+        ok(q.c >= 0 && q.c <= 3, p.id + ' q' + i + ' correct index');
+        ok(new Set(q.a.map((a) => a.toLowerCase())).size === 4, p.id + ' q' + i + ' has four DIFFERENT answers: ' + q.a.join(' / '));
+        ok(!seen.has(q.q.toLowerCase()), p.id + ' repeats a question: ' + q.q);
+        seen.add(q.q.toLowerCase());
+      });
+      eq(H.normalizePack(p).qs, p.qs, p.id + ' survives the boundary unchanged');
+    });
+  });
+  t('packFor and questionAt read the embedded pack by id, or the room’s own copy', () => {
+    const r = { game: { packId: 'office', order: [2, 0] }, pack: null };
+    eq(H.questionAt(r, 0).q, H.PACKS[1].qs[2].q, 'the order indexes the pack');
+    eq(H.questionAt({ game: { packId: 'nope', order: [0] } }, 0), null, 'an unknown pack is no question');
+    const own = { name: 'Mine', qs: [{ q: 'Q?', a: ['1', '2', '3', '4'], c: 1 }] };
+    eq(H.questionAt({ game: { packId: H.CUSTOM_PACK_ID, order: [0] }, pack: own }, 0).q, 'Q?', 'a custom pack rides on the room');
+    eq(H.questionAt({ game: { packId: H.CUSTOM_PACK_ID, order: [0] }, pack: null }, 0), null, 'and without it there is nothing to ask');
+  });
+  t('the question order is a shuffle of the whole pack, from crypto', () => {
+    const o = H.shuffled(40);
+    eq(o.slice().sort((a, b) => a - b), Array.from({ length: 40 }, (_, i) => i), 'every index once');
+    ok(JSON.stringify(H.shuffled(40)) !== JSON.stringify(H.shuffled(40)), 'and not the same twice');
+    ok(/crypto\.getRandomValues/.test((stripComments(APP_SRC).match(/function shuffled[\s\S]*?\n\}/) || [''])[0]), 'drawn from crypto');
+  });
+
+  group('the custom-pack parser');
+  t('reads question | a | b | c | d | correct, by letter or number', () => {
+    const r = H.parsePack('Mine', 'What is 2+2? | 3 | 4 | 5 | 6 | B\n\n# a comment\nCapital of France? | Paris | Rome | Oslo | Bern | 1\n');
+    eq(r.bad, [], 'nothing refused');
+    eq(r.pack.name, 'Mine');
+    eq(r.pack.qs.length, 2, 'blank and comment lines are skipped');
+    eq(r.pack.qs[0].c, 1, 'B is the second answer');
+    eq(r.pack.qs[1].c, 0, '1 is the first');
+    eq(r.pack.qs[0].a, ['3', '4', '5', '6'], 'answers trimmed');
+  });
+  t('names the LINES it cannot read rather than dropping them silently', () => {
+    const r = H.parsePack('Mine', 'ok? | a | b | c | d | A\nfive parts | a | b | c | d\ntoo | many | parts | a | b | c | d\nbad key | a | b | c | d | E\n | a | b | c | d | A\nok again? | a | b | c | d | 4');
+    eq(r.pack.qs.length, 2, 'the two good lines');
+    eq(r.bad.map((b) => b.line), [2, 3, 4, 5], 'the four bad ones, by line number');
+    ok(/6 parts/.test(r.bad[0].why) && /more than 6/.test(r.bad[1].why) && /A–D or 1–4/.test(r.bad[2].why) && /must have text/.test(r.bad[3].why), 'each with its reason');
+  });
+  t('caps at sixty and says how many were left out', () => {
+    const lines = Array.from({ length: 65 }, (_, i) => 'Q' + i + '? | a | b | c | d | A').join('\n');
+    const r = H.parsePack('Big', lines);
+    eq(r.pack.qs.length, H.PACK_QS_MAX, 'sixty kept');
+    eq(r.over, 5, 'five over');
+  });
+  t('an empty paste is an empty pack, never a throw', () => {
+    eq(H.parsePack('x', '').pack.qs.length, 0);
+    eq(H.parsePack('x', null).bad, []);
+    eq(H.parsePack('', 'q | a | b | c | d | a').pack.name, 'Untitled pack', 'a missing name is named');
+  });
+
+  group('trivia: the engine is a pure step()');
+  const TRIV = H.GAMES.trivia;
+  const triviaRoom = (game, scores) => fixtureRoom({ phase: 'play', kind: 'trivia', scores: scores || {},
+    game: Object.assign({ step: 'ask', stepAt: T0, stepMs: 20000, round: 1, qi: 0, order: [0, 1, 2], n: 3, secs: 20, packId: 'general', correct: null, counts: null, gained: null }, game || {}) });
+  const Q0 = H.PACKS[0].qs[0], Q1 = H.PACKS[0].qs[1];
+  const ctx = (answers, t) => ({ answers: answers, players: fixturePlayers(), now: t });
+  t('an open question waits until everyone online has answered, or time is up', () => {
+    const r = H.normalizeRoom(triviaRoom());
+    eq(TRIV.step(r, ctx([], T0 + 1000)), null, 'nobody has answered and there is time');
+    eq(TRIV.step(r, ctx([{ uid: U.host, r: 1, v: Q0.c, at: T0 + 5000 }], T0 + 6000)), null, 'Ada has, Ben (online) has not');
+    ok(TRIV.step(r, ctx([{ uid: U.host, r: 1, v: Q0.c, at: T0 + 5000 }, { uid: U.b, r: 1, v: 0, at: T0 + 7000 }], T0 + 8000)),
+       'both online players in: the reveal comes at once — Cat, away, is not waited for');
+    ok(TRIV.step(r, ctx([], T0 + 20000)), 'and with nobody answering, time up is enough');
+  });
+  t('the reveal carries the correct index, the spread and what each player gained', () => {
+    const r = H.normalizeRoom(triviaRoom());
+    const wrong = (Q0.c + 1) % 4;
+    const patch = TRIV.step(r, ctx([
+      { uid: U.host, r: 1, v: Q0.c, at: T0 + 5000 },   /* right, with 15 s of 20 left: 100 + 75 */
+      { uid: U.b, r: 1, v: wrong, at: T0 + 2000 },      /* wrong, fast: nothing */
+      { uid: U.c, r: 1, v: Q0.c, at: T0 + 19000 },      /* right, late: 100 + 5 */
+      { uid: U.d, r: 1, v: Q0.c, at: T0 + 1000 },       /* a late joiner with no score yet: 100 + 95 from 0 */
+    ], T0 + 20000));
+    eq(patch.game.step, 'reveal');
+    eq(patch.game.stepAt, 'now', 'the reveal’s clock is the server’s');
+    eq(patch.game.stepMs, H.REVEAL_MS);
+    eq(patch.game.correct, Q0.c);
+    const counts = [0, 0, 0, 0]; counts[Q0.c] = 3; counts[wrong] = 1;
+    eq(patch.game.counts, counts, 'three right, one wrong');
+    eq(patch.game.gained, { [U.host]: 175, [U.c]: 105, [U.d]: 195 }, '100 plus floor(100 × remaining / 20 s)');
+    eq(patch.scores, { [U.host]: 175, [U.c]: 105, [U.d]: 195 }, 'added to a scoreboard that had nothing');
+    ok(!(U.b in patch.scores), 'a wrong answer scores nothing and is not even a key');
+  });
+  t('an answer for another round is ignored, and points add to what was there', () => {
+    const r = H.normalizeRoom(triviaRoom({ round: 2, qi: 1 }, { [U.host]: 300 }));
+    const patch = TRIV.step(r, ctx([
+      { uid: U.host, r: 2, v: Q1.c, at: T0 + 10000 },
+      { uid: U.b, r: 1, v: Q1.c, at: T0 + 1000 },        /* last round's answer, still sitting there */
+    ], T0 + 20000));
+    eq(patch.game.counts.reduce((a, b) => a + b, 0), 1, 'only the live answer is counted');
+    eq(patch.game.gained, { [U.host]: 150 }, 'half the time left: 100 + 50');
+    eq(patch.scores, { [U.host]: 450 }, 'on top of the 300 already there');
+  });
+  t('a reveal holds five seconds, then asks the next question or ends the game', () => {
+    const rv = H.normalizeRoom(triviaRoom({ step: 'reveal', stepMs: 5000, correct: 1, counts: [0, 1, 0, 0], gained: {} }));
+    eq(TRIV.step(rv, ctx([], T0 + 4000)), null, 'not yet');
+    const next = TRIV.step(rv, ctx([], T0 + 5000));
+    eq([next.game.step, next.game.qi, next.game.round, next.game.stepMs, next.game.stepAt], ['ask', 1, 2, 20000, 'now'], 'the next question, a new round, the server’s clock');
+    eq([next.game.correct, next.game.counts, next.game.gained], [null, null, null], 'with the reveal’s answers cleared');
+    const last = H.normalizeRoom(triviaRoom({ step: 'reveal', stepMs: 5000, qi: 2, round: 3, correct: 1, counts: [0, 1, 0, 0], gained: {} }));
+    const end = TRIV.step(last, ctx([], T0 + 5000));
+    eq(end.phase, 'results', 'after the last question, results');
+    eq(end.game.step, 'results');
+    eq(TRIV.step(H.normalizeRoom(fixtureRoom({ phase: 'results', kind: 'trivia' })), ctx([], T0 + 99999)), null, 'and results is a resting state');
+  });
+  t('a whole game, driven by step() with fake answers, ends with the right scoreboard', () => {
+    let r = H.normalizeRoom(triviaRoom());
+    let t = T0;
+    const apply = (patch) => {
+      const raw = JSON.parse(JSON.stringify(Object.assign({}, r, patch)));
+      if (raw.game.stepAt === 'now') raw.game.stepAt = t;
+      r = H.normalizeRoom(raw);
+    };
+    let steps = 0;
+    while (r.phase === 'play' && steps < 20) {
+      const q = H.questionAt(r, r.game.qi);
+      const answers = r.game.step === 'ask'
+        ? [{ uid: U.host, r: r.game.round, v: q.c, at: t + 10000 }, { uid: U.b, r: r.game.round, v: (q.c + 2) % 4, at: t + 1000 }]
+        : [];
+      t += r.game.stepMs;
+      const patch = TRIV.step(r, ctx(answers, t));
+      ok(patch, 'step ' + steps + ' produced a patch');
+      apply(patch);
+      steps++;
+    }
+    eq(r.phase, 'results', 'the game ended');
+    eq(steps, 6, 'three asks and three reveals');
+    eq(r.scores, { [U.host]: 450 }, 'Ada at the halfway mark three times: 150 × 3; Ben wrong every time');
+  });
+  t('encode accepts 0..3 and nothing else', () => {
+    eq(TRIV.encode('2'), 2);
+    eq(TRIV.encode(0), 0);
+    eq(TRIV.encode(4), null);
+    eq(TRIV.encode('x'), null);
+    eq(TRIV.encode(1.5), null);
+  });
+  t('setup builds a game from the picked pack, and copies a custom pack onto the room', () => {
+    const b = TRIV.setup({ pack: 'movies', n: '10', secs: '15' }, fixturePlayers(), { packs: [] });
+    eq([b.game.step, b.game.stepAt, b.game.stepMs, b.game.round, b.game.qi, b.game.n, b.game.secs, b.game.packId], ['ask', 'now', 15000, 1, 0, 10, 15, 'movies']);
+    eq(b.game.order.length, 10, 'ten of forty');
+    eq(new Set(b.game.order).size, 10, 'no question twice');
+    ok(b.game.order.every((i) => i >= 0 && i < 40), 'all inside the pack');
+    eq(b.pack, null, 'an embedded pack is not copied');
+    const own = { name: 'Mine', qs: [{ q: 'Q?', a: ['1', '2', '3', '4'], c: 1 }] };
+    const c = TRIV.setup({ pack: H.CUSTOM_PACK_ID + ':0', n: '20', secs: '20' }, fixturePlayers(), { packs: [own] });
+    eq(c.game.packId, H.CUSTOM_PACK_ID);
+    eq(c.pack, own, 'a custom pack rides on the room so players and a handed-off host have it');
+    eq(c.game.n, 1, 'and the count is capped at what the pack holds');
+    ok(TRIV.setup({ pack: H.CUSTOM_PACK_ID + ':3', n: '20', secs: '20' }, [], { packs: [] }).error, 'a missing custom pack is an error, not a crash');
+  });
+  t('the game map is normalized field by field, uids and all', () => {
+    const r = H.normalizeRoom(triviaRoom({ gained: { [U.b]: '50', 'bad uid': 9 }, counts: [1, 2, 3, 'x'], order: [99, -1, 2], secs: 999, correct: 7 }));
+    eq(r.game.gained, { [U.b]: 50 }, 'a bad uid is dropped from gained');
+    eq(r.game.counts, [1, 2, 3, 0], 'counts coerced');
+    eq(r.game.order, [59, 0, 2], 'order indexes clamped to the pack cap');
+    eq(r.game.secs, 120, 'seconds clamped');
+    eq(r.game.correct, 3, 'correct clamped');
+    eq(Object.keys(r.game).sort(), ['correct', 'counts', 'gained', 'n', 'order', 'packId', 'qi', 'round', 'secs', 'step', 'stepAt', 'stepMs'], 'and nothing else');
+  });
+
+  group('trivia: what a player sees');
+  t('a question is four buttons; answering marks yours and disables the rest', () => {
+    const D = W.document;
+    try {
+      H.__setOffset(T0 - Date.now());
+      H.__setMe(U.b);
+      H.__plantRoom(triviaRoom());
+      H.__plantPlayers(fixturePlayers());
+      const btns = [...D.querySelectorAll('.answers button')];
+      eq(btns.length, 4, 'four answers');
+      eq(btns.map((b) => b.querySelector('span').textContent), Q0.a, 'the pack’s answers, in order');
+      ok(btns.every((b) => !b.disabled), 'all pressable');
+      ok(/Question 1 of 3/.test(D.getElementById('roomView').textContent), 'numbered');
+      ok(/0 of 2 answered/.test(D.getElementById('roomView').textContent), 'the online count, not the roster');
+      /* Press one, through the demo transport, so nothing reaches the cloud. */
+      H.__demo(true);
+      btns[2].click();
+      eq(H.__myPick(), { round: 1, v: 2 }, 'the pick is remembered for the round');
+      const again = [...D.querySelectorAll('.answers button')];
+      ok(again[2].classList.contains('mine') && /your answer/.test(again[2].textContent), 'and marked');
+      ok(again.every((b) => b.disabled), 'and the rest are closed');
+    } finally { H.__demo(false); home(); }
+  });
+  t('the reveal marks the correct answer, your wrong one, the spread and your points — with words, never colour alone', () => {
+    const D = W.document;
+    try {
+      H.__setOffset(T0 - Date.now());
+      H.__setMe(U.b);
+      H.__plantRoom(triviaRoom({ step: 'reveal', stepMs: 5000, correct: Q0.c, counts: [1, 1, 0, 0], gained: { [U.host]: 175 } }));
+      H.__plantPlayers(fixturePlayers());
+      const btns = [...D.querySelectorAll('.answers button')];
+      ok(btns[Q0.c].classList.contains('right') && /correct/.test(btns[Q0.c].textContent), 'the right one says so');
+      ok(/1 answer\b/.test(btns[0].textContent), 'the spread is on each answer');
+      ok(/No points this time|didn’t answer/.test(D.getElementById('roomView').textContent), 'Ben gained nothing and is told');
+      H.__setMe(U.host);
+      ok(/\+175/.test(D.getElementById('roomView').textContent), 'Ada sees her points');
+      const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+      ok(/\.answers button\.right \{[^}]*var\(--ok\)/.test(css) && /\.answers button\.wrong \{[^}]*var\(--err\)/.test(css), 'the edges are the status tokens');
+      ok(/\.answers\.revealed button:disabled \{ opacity: 1;/.test(css), 'and a revealed answer stays readable, not dimmed as a control');
+    } finally { home(); }
+  });
+  t('the countdown is the server’s clock plus this browser’s offset, so a hidden tab is right the moment it is looked at', () => {
+    const D = W.document;
+    try {
+      H.__setOffset(T0 + 12000 - Date.now());
+      H.__setMe(U.b);
+      H.__plantRoom(triviaRoom());
+      H.__plantPlayers(fixturePlayers());
+      eq(D.getElementById('qLeft').textContent, '8', 'twelve seconds into twenty');
+      H.__setOffset(T0 + 17000 - Date.now());
+      TRIV.tick(H.__room(), T0 + 17000);
+      eq(D.getElementById('qLeft').textContent, '3', 'the tick reads the same clock');
+      ok(D.getElementById('qLeft').classList.contains('low'), 'and the last five seconds are marked');
+    } finally { home(); }
+  });
+  t('a missing pack draws a sentence, not a throw', () => {
+    const D = W.document;
+    try {
+      H.__setMe(U.b);
+      H.__plantRoom(triviaRoom({ packId: 'nope' }));
+      ok(/missing/.test(D.getElementById('roomView').textContent));
+    } finally { home(); }
+  });
+  t('the lobby offers every embedded pack and every custom one, and Custom Packs… opens the window', () => {
+    const D = W.document;
+    try {
+      H.__plantLocal(Object.assign({}, FIXTURE_LOCAL, { packs: [{ name: 'Mine', qs: [{ q: 'Q?', a: ['1', '2', '3', '4'], c: 1 }] }] }));
+      inLobby(U.host);
+      const opts = [...D.querySelectorAll('#pickPack option')].map((o) => o.value);
+      eq(opts, ['general', 'office', 'movies', 'decades', H.CUSTOM_PACK_ID + ':0'], 'four embedded, then mine');
+      ok(/Mine \(1, yours\)/.test(D.getElementById('pickPack').textContent), 'named as yours');
+      D.getElementById('packEditBtn').click();
+      ok(D.getElementById('packDialog').open, 'the window opens');
+      ok(/Mine/.test(D.getElementById('packList').textContent), 'listing the pack');
+      D.getElementById('packDialog').close();
+    } finally { home(); H.__plantLocal(FIXTURE_LOCAL); }
+  });
+
 }
 
 /* ── EVERY TEST IS AWAITED (2026-09-14) ─────────────────────────────────────

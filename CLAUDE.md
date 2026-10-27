@@ -86,6 +86,37 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
+**M2 — trivia (2026-10-27).** `GAMES.trivia` — `normalize`, `options`, `setup`, a PURE
+`step()`, `encode`, `view`, `tick`, `onClick`, `results`, `demoAnswer` — four embedded packs
+of forty (`PACK_LIST` → `PACKS`), `parsePack` and the Custom Packs window, the countdown
+from server time plus the measured offset. The suite drives a whole game through `step()`
+with fake answers and a fake clock, pins the packs (forty each, four distinct answers, no
+repeats, unchanged by the boundary) and the parser's line-numbered report. The demo's
+invented players answer on their own, each at a pace named in their nickname. `EXPECTED`
+131. Still unobserved against a real Firebase project: everything in the module, and the
+three "Done" lines in the plan that need two browser profiles (A creates / B joins / C by
+link; host reload mid-game; hidden-tab countdown on return) wait for the console steps.
+
+**Things a tidy-up would break (M2):**
+- **`myPick` is reset when the phase leaves `play` or the kind changes**, in `onRoom`. A
+  new game starts its rounds from 1, so an answer remembered from the last game would read
+  as this game's and close the buttons before anyone pressed one.
+- **`step()` waits for everyone ONLINE, never everyone on the roster** — a player who shut
+  the laptop would otherwise hold every question to its full time. And it reads only answers
+  whose `r` is the current round: last round's answer document is still sitting there.
+- **The speed bonus is `floor(100 × remaining / stepMs)` from `answer.at − stepAt`**, both
+  server timestamps, clamped to [0, stepMs]. A wrong answer is not a key in `gained` or
+  `scores` at all — a nought there would read as "answered wrongly" on the board.
+- **A custom pack is COPIED onto `room.pack` at setup**; the embedded ones travel as an id.
+  `questionAt` reads whichever applies and answers null rather than throwing, and the view
+  says "missing" — a reload on a build that lost a pack id must not take the room down.
+- **`PACK_LIST` is declared ABOVE `GAMES.trivia`** (which reads `PACKS` in `options()` at
+  call time, but `PACKS` itself is a top-level literal) — a `const` is in its temporal dead
+  zone until its line runs, League Night's boot-time TDZ.
+- **The reveal re-asserts `opacity: 1` on the disabled answers** (`.answers.revealed
+  button:disabled`): pack rule 20 dims a disabled control, which is right for a control and
+  wrong for a result the reader is meant to study.
+
 **M1 — the lobby (2026-10-27).** The cloud module (anonymous sign-in, listeners with the
 `hasPendingWrites` skip, `create`/`join`/`push`/`answer`/`heartbeat`/`claimHost`/`extend`/
 `leave`), the lobby with roster and dots, the room card with the expiry countdown and

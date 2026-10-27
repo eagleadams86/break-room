@@ -15,6 +15,33 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
+**Milestone 2 — trivia (27 October 2026).** The first game, and the shape the next three
+follow:
+
+- **Four packs of forty**, embedded in the page: General Knowledge, Office & Tech, Movies &
+  Music, and 80s to 2000s. The host picks a pack, how many questions (10, 20 or 40) and how
+  long each one gets (15, 20 or 30 seconds), and presses *Start Trivia*.
+- **A question at a time.** Four big answers, a countdown, and "3 of 4 answered" so the
+  host can see who is still thinking. The question closes when everyone online has answered
+  or the time is up, whichever is first; the reveal then holds for five seconds — the right
+  answer marked, your wrong one marked, the room's spread under each option and your points
+  for the question — and the next one opens.
+- **Points.** 100 for a correct answer plus a speed bonus of up to 100 for how much of the
+  time was left, measured by the server's clock on both ends. Points carry across games for
+  the whole night; a late joiner starts on nought. The scoreboard shows at the end of a game
+  and in the lobby between games.
+- **Your own packs.** *Custom Packs…* in the lobby opens a window where the host pastes
+  one question per line as `question | a | b | c | d | correct` (A–D or 1–4). Lines that
+  cannot be read are named by number rather than dropped. Packs live in this browser, ride
+  in a backup, and are copied onto the room when a game starts from one — so players, and a
+  host who takes over mid-game, have the questions.
+- **A hidden tab is right the moment you look at it.** The countdown is worked out from the
+  server's timestamp and this browser's measured clock offset, never from a counter that a
+  backgrounded tab would have slowed.
+- **The demo room plays too:** its invented players answer at their own pace — one always
+  right and quick, one right half the time and slow — so a whole game can be watched with
+  nobody else there.
+
 **Milestone 1 — the lobby (27 October 2026).** A room you can actually be in:
 
 - **Start or join.** *Start a Room* opens a room with a six-letter code and makes you its
@@ -44,13 +71,13 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (111 tests as of milestone 1).
+clause by clause, and a suite with a floor (131 tests as of milestone 2).
 
 **Until the cloud is connected** (the checklist below) both doors on the home card are
 disabled and the card says why; the demo room is the only room there is.
 
-**Coming next:** trivia with four embedded packs and a custom-pack editor (milestone 2),
-then drawing & guess, icebreakers and Codenames.
+**Coming next:** drawing & guess (milestone 3), icebreakers (4), Codenames (5), and last
+of all Google sign-in for a standing house with a cross-night leaderboard (6).
 
 ## How a Room Works
 
