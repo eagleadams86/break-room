@@ -1378,7 +1378,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 5;
+const SCHEMA = 6;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -1434,6 +1434,9 @@ function cleanCode(raw) {
    the way in, never refused: a nickname of 21 characters is a nickname, not
    an attack. */
 const NICK_MAX = 20;
+/* A game's id (`game.gid`) and a player's `out` (the gid of the game they
+   quit): random ints below this, so a quit never carries into the next game. */
+const GID_MAX = 2000000000;
 const PLAYERS_MAX = 32;        /* scores map ≤ 32 keys in the rules */
 const FEED_MAX = 20;
 const FEED_TEXT_MAX = 40;
@@ -1575,6 +1578,11 @@ function normalizeGame(kind, raw) {
     stepAt: toMs(g.stepAt),
     stepMs: int(g.stepMs, 0, 60 * 60 * 1000, 0),
     round: int(g.round, 0, 1e6, 0),
+    /* Every game (2026-10-27): its id, which a player's `out` names when they
+       quit it, and the server time the host paused it (0 = running). */
+    gid: int(g.gid, 0, GID_MAX, 0),
+    pausedAt: toMs(g.pausedAt),
+    early: g.early ? 1 : 0,       /* the host ended it before its time */
   };
   const game = GAMES[kind];
   return game && game.normalize ? game.normalize(g, base) : base;
@@ -1620,6 +1628,7 @@ function normalizePlayers(list) {
       seenAt: toMs(p.seenAt),
       ansR: int(p.ansR, 0, 1e6, 0),
       hue: int(p.hue, 0, 11, 0),
+      out: int(p.out, 0, GID_MAX, 0),
     };
   }).filter(Boolean).sort((a, b) => a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1)).slice(0, PLAYERS_MAX);
 }
@@ -1659,6 +1668,14 @@ function nextHost(list, t) {
   if (!online.length) return null;
   online.sort((a, b) => a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1));
   return online[0].uid;
+}
+/* Quitting a game (2026-10-27): a player whose `out` names this game's id
+   sat it out. The engines are handed only the players still IN it, so to
+   every game a quitter looks exactly like somebody who left — trivia stops
+   waiting for their answer, the drawing game skips their turn, Codenames
+   replaces a spymaster. The next game has a new id, so everyone is in again. */
+function inGame(p, g) {
+  return !!p && !(g && g.gid && p.out === g.gid);
 }
 function hostIsStale(list, hostUid, t) {
   const h = (list || []).find((p) => p.uid === hostUid);
@@ -2366,12 +2383,12 @@ GAMES.trivia = {
     if (myPick.round === r.game.round) return;
     myPick = { round: r.game.round, v: enc };
     noteWrite();
-    transport().answer(r.game.round, enc).catch((e) => { console.warn('answer', e); myPick = { round: 0, v: null }; toast(describeCloudError(e)); });
+    answerGame(r.game.round, enc).catch((e) => { console.warn('answer', e); myPick = { round: 0, v: null }; toast(describeCloudError(e)); });
     render();
   },
   results(r, who, list) {
     const g = r.game;
-    return '<p class="lede">' + g.order.length + ' questions from <strong>' + esc((packFor(r) || { name: 'the pack' }).name) + '</strong>. '
+    return '<p class="lede">' + (g.early ? Math.min(g.qi + 1, g.order.length) + ' of ' : '') + g.order.length + ' questions from <strong>' + esc((packFor(r) || { name: 'the pack' }).name) + '</strong>. '
       + 'Points carry on to the next game — the scoreboard below is the night so far.</p>';
   },
   /* The demo's invented players. "Quick" is right and fast; "slow" is right
@@ -2783,6 +2800,10 @@ GAMES.draw = {
     const timeUp = t >= g.stepAt + g.stepMs;
     const fromDrawer = ctx.answers.find((a) => a.uid === g.drawer && a.r === g.round);
     const picked = fromDrawer ? parsePick(fromDrawer.v) : null;
+    /* The drawer quit the game (or is gone): the turn passes at once rather
+       than run a clock nobody is drawing against. Points already won stay. */
+    if ((g.step === 'pick' || g.step === 'draw') && !ctx.players.some((p) => p.uid === g.drawer && isOnline(p, t)))
+      return GAMES.draw.advance(r, ctx, [{ t: 'info', uid: g.drawer, text: 'left the game' }]);
     if (g.step === 'pick') {
       if (picked) {
         return { game: Object.assign({}, g, { step: 'draw', stepAt: 'now', stepMs: g.secs * 1000, wordHash: picked.hash,
@@ -3001,7 +3022,7 @@ function sendGuess(r, who) {
   const v = encodeGuess(myGuess.n, text);
   box.value = '';
   noteWrite();
-  transport().answer(g.round, v).catch((e) => { console.warn('guess', e); toast(describeCloudError(e)); });
+  answerGame(g.round, v).catch((e) => { console.warn('guess', e); toast(describeCloudError(e)); });
 }
 
 /* ═══════════════════════════════ The canvas ══════════════════════════════
@@ -3473,6 +3494,12 @@ GAMES.ice = {
   },
   /* A new prompt clears the cards, and results clear them AND the key: the
      text people wrote leaves the cloud with the prompt it answered. */
+  /* Ended early by the host: the cards and the key leave the cloud, as at
+     the natural end. */
+  end(r) {
+    return { phase: 'results', _key: { n: '', a: [], l: [] },
+             game: Object.assign({}, r.game, GAMES.ice.blank(), { step: 'results', stepAt: 'now', stepMs: 0 }) };
+  },
   nextPrompt(r, ctx, note) {
     const g = r.game;
     const feed = note ? r.feed.concat([{ t: 'info', uid: r.host, text: note }]).slice(-FEED_MAX) : r.feed;
@@ -3630,7 +3657,7 @@ GAMES.ice = {
     if (!icePickValid(g, val)) return;
     myIce.round = g.round; myIce.v = val;
     noteWrite();
-    transport().answer(g.round, val).catch((e) => { console.warn('ice pick', e); myIce.round = 0; myIce.v = null; toast(describeCloudError(e)); render(); });
+    answerGame(g.round, val).catch((e) => { console.warn('ice pick', e); myIce.round = 0; myIce.v = null; toast(describeCloudError(e)); render(); });
     render();
   },
   results(r) {
@@ -3667,7 +3694,7 @@ function sendIceWrite(r) {
   if (!v) { toast(g.mode === 'twoTruths' ? 'Fill in all three' : 'Write something first'); return; }
   myIce = { round: g.round, v: v, write: { pi: g.pi, v: v } };
   noteWrite();
-  transport().answer(g.round, v).catch((e) => { console.warn('ice write', e); myIce = { round: 0, v: null, write: null }; toast(describeCloudError(e)); render(); });
+  answerGame(g.round, v).catch((e) => { console.warn('ice write', e); myIce = { round: 0, v: null, write: null }; toast(describeCloudError(e)); render(); });
   render();
 }
 
@@ -3831,7 +3858,7 @@ GAMES.codenames = {
       guessMs: int(g.guessMs, 30000, 600000, 180000),
       nonce: /^[0-9a-f]{16}$/.test(String(g.nonce)) ? String(g.nonce) : '',
       winner: CN_TEAMS.indexOf(g.winner) === -1 ? '' : g.winner,
-      why: ['assassin', 'found', 'lost', 'short'].indexOf(g.why) === -1 ? '' : g.why,
+      why: ['assassin', 'found', 'lost', 'short', 'ended'].indexOf(g.why) === -1 ? '' : g.why,
       colors: Array.isArray(g.colors) && g.colors.length === CN_CARDS ? g.colors.map((x) => int(x, 1, 4, CN_NEUTRAL)) : null,
       gained: g.gained == null ? null : uidMap(g.gained, 1e5),
     });
@@ -3960,6 +3987,10 @@ GAMES.codenames = {
   /* The end: every player on the winning team scores, the whole key goes on
      the room so everyone sees the board they played, and the key document is
      emptied. */
+  /* Ended early by the host: no winner, the board shown, the key emptied. */
+  end(r, key) {
+    return GAMES.codenames.finish(r, r.game, cnKeyFor(r.game, key), null, 'ended', r.feed);
+  },
   finish(r, g, key, winner, why, feed) {
     const scores = Object.assign({}, r.scores), gained = {};
     if (winner) Object.keys(g.teams).filter((u) => g.teams[u] === winner).forEach((u) => { gained[u] = CN_WIN_PTS; scores[u] = (scores[u] || 0) + CN_WIN_PTS; });
@@ -4117,7 +4148,8 @@ GAMES.codenames = {
       ? '<p class="lede"><strong>' + CN_TEAM_NAMES[g.winner] + ' wins</strong> — ' + (g.why === 'assassin'
           ? CN_TEAM_NAMES[cnOther(g.winner)] + ' found the assassin.' : 'every one of their words found.')
         + ' Everyone on ' + CN_TEAM_NAMES[g.winner] + ' scores ' + CN_WIN_PTS + '.</p>'
-      : '<p class="lede">The game ended without a winner — ' + (g.why === 'short' ? 'too few people were left to play on.' : 'the host’s browser lost the key.') + '</p>';
+      : '<p class="lede">The game ended without a winner — ' + (g.why === 'short' ? 'too few people were left to play on.'
+          : g.why === 'ended' ? 'the host ended it early.' : 'the host’s browser lost the key.') + '</p>';
     return head + GAMES.codenames.teamsHtml(g, who) + (g.words.length === CN_CARDS ? GAMES.codenames.boardHtml(g, who, { key: null, can: false, picked: null }) : '')
       + '<p class="hint">The key has been cleared from the room’s private record. Points carry on to the next game.</p>';
   },
@@ -4142,7 +4174,7 @@ function sendCnClue(r) {
   const v = 'C|' + w + '|' + n;
   myCn = { round: g.round, v: v };
   noteWrite();
-  transport().answer(g.round, v).catch((e) => { console.warn('cn clue', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
+  answerGame(g.round, v).catch((e) => { console.warn('cn clue', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
   render();
 }
 function sendCnPick(r, v) {
@@ -4150,7 +4182,7 @@ function sendCnPick(r, v) {
   if (g.step !== 'guess' || g.teams[me] !== g.turn || g.spy[g.turn] === me || cnAnswered(r, me) || !cnPickValid(g, v)) return;
   myCn = { round: g.round, v: v };
   noteWrite();
-  transport().answer(g.round, v).catch((e) => { console.warn('cn pick', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
+  answerGame(g.round, v).catch((e) => { console.warn('cn pick', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
   render();
 }
 
@@ -4234,6 +4266,7 @@ function renderRoster() {
           + avatarHtml(p)
           + '<span class="who">' + esc(p.nick) + (p.uid === me ? ' <span class="you">(you)</span>' : '') + '</span>'
           + (p.uid === room.host ? '<span class="pill ok">host</span>' : '')
+          + (room.phase !== 'lobby' && !inGame(p, room.game) ? '<span class="pill">sitting out</span>' : '')
           + (canHandTo(p, t) ? '<button type="button" class="btn-small" data-make-host="' + esc(p.uid) + '" aria-label="Make '
               + esc(p.nick) + ' the host">Make Host</button>' : '')
           + '</li>';
@@ -4249,6 +4282,34 @@ function renderRoster() {
 function canHandTo(p, t) {
   return !!room && iAmHost() && !demoOn && room.phase !== 'play' && !!p && p.uid !== me && isOnline(p, t);
 }
+/* The game's own buttons, on the room card so the drawing game's in-place
+   refresh (which redraws the side column) keeps them. The host pauses and
+   ends the game for everyone; ANY player — the host too — may quit it. At
+   the results a player's way out is back to the lobby; the host already
+   has the button that takes everyone there. */
+function gameNow() {
+  return room && room.phase === 'play' && room.game.pausedAt ? room.game.pausedAt : now();
+}
+function playing() {
+  return room ? players.filter((p) => inGame(p, room.game)) : [];
+}
+function sittingOut() {
+  if (!room || room.phase === 'lobby' || !me) return false;
+  const p = players.find((x) => x.uid === me);
+  return !!p && !inGame(p, room.game);
+}
+function gameControls() {
+  if (!room || room.phase === 'lobby') return '';
+  const btns = [];
+  if (room.phase === 'play' && iAmHost()) {
+    btns.push('<button type="button" id="pauseBtn">' + (room.game.pausedAt ? '▶ Resume' : '⏸ Pause') + '</button>');
+    btns.push('<button type="button" id="endGameBtn" class="danger">End Game for Everyone</button>');
+  }
+  if (!sittingOut() && room.game.gid && !(room.phase === 'results' && iAmHost())) {
+    btns.push('<button type="button" id="quitGameBtn">' + (room.phase === 'results' ? 'Back to the Lobby' : 'Quit Game') + '</button>');
+  }
+  return btns.length ? '<div class="row-actions" style="justify-content:flex-start;margin-top:var(--sp-5)">' + btns.join('') + '</div>' : '';
+}
 function renderRoomCard() {
   const t = now();
   const left = room.expiresAt - t;
@@ -4261,6 +4322,7 @@ function renderRoomCard() {
     + (canExtend ? ' · <button type="button" class="link" id="extendBtn">add 2 hours</button>' : '')
     + (iAmHost() && !canExtend ? ' · at the twelve-hour limit' : '') + '</p>'
     + houseLine()
+    + gameControls()
     + '<div class="row-actions" style="justify-content:flex-start;margin-top:var(--sp-5)">'
     + '<button type="button" id="leaveBtn">Leave the Room</button></div>'
     + '</div>';
@@ -4306,6 +4368,7 @@ function pickState() {
 
 function renderLobby() {
   const kinds = Object.keys(GAMES);
+  const canStart = iAmHost() && room.phase === 'lobby';
   let picker = '';
   /* EVERYONE sees the games and their options (Charles, 2026-10-27): a
      player can look through what's on offer and suggest the next one, and a
@@ -4324,12 +4387,25 @@ function renderLobby() {
         + (g.options ? g.options(pick) : '')
         + '</div>'
         + '<div class="row-actions" style="justify-content:flex-start">'
-        + (iAmHost() ? '<button type="button" class="primary" id="startBtn">Start ' + esc(g.name) + '</button>' : '')
+        + (canStart ? '<button type="button" class="primary" id="startBtn">Start ' + esc(g.name) + '</button>' : '')
         + (g.extra ? g.extra() : '') + '</div>'
-        + (iAmHost() ? '' : '<p class="hint" id="pickNote">Only <strong>' + esc(nickOf(room.host)) + '</strong>, the host, can start a game — '
-            + 'suggest one on the call, or ask to be made host.</p>')
+        + (canStart ? '' : room.phase !== 'lobby'
+            ? '<p class="hint" id="pickNote">The next game starts from the lobby, once this one is over.</p>'
+            : '<p class="hint" id="pickNote">Only <strong>' + esc(nickOf(room.host)) + '</strong>, the host, can start a game — '
+              + 'suggest one on the call, or ask to be made host.</p>')
         + '<p class="warn-line" id="lobbyWarn" role="status"></p>';
     }
+  }
+  if (room.phase !== 'lobby') {
+    /* Sitting a game out: the lobby, with the way back in on top. */
+    const g = GAMES[room.kind];
+    const name = g ? g.name : 'The game';
+    const back = room.phase === 'results'
+      ? '<p class="lede">' + esc(name) + ' is over — the others are looking at the results until <strong>' + esc(nickOf(room.host)) + '</strong> brings everyone back.</p>'
+        + '<div class="row-actions" style="justify-content:flex-start"><button type="button" class="primary" id="rejoinGameBtn">See the Results</button></div>'
+      : '<p class="lede">You’ve left this game. ' + esc(name) + ' is still on for everyone else; look through the games while you wait, or jump back in.</p>'
+        + '<div class="row-actions" style="justify-content:flex-start"><button type="button" class="primary" id="rejoinGameBtn">Rejoin the Game</button></div>';
+    return '<div class="card"><h2>Lobby</h2>' + back + picker + '</div>' + renderScores('Scores So Far');
   }
   if (!iAmHost()) {
     picker = '<p class="lede">Waiting for <strong>' + esc(nickOf(room.host)) + '</strong> to start a game. '
@@ -4341,12 +4417,13 @@ function renderLobby() {
 function renderPlay() {
   const g = GAMES[room.kind];
   if (!g) return '<div class="card"><h2>A Game Is On</h2><p class="lede">This copy of Break Room does not know the game <strong>' + esc(String(room.kind)) + '</strong> — reload to pick up the latest version.</p></div>';
-  return g.view(room, me, players, answers, now());
+  return g.view(room, me, playing(), answers, gameNow());
 }
 
 function renderResults() {
   const g = GAMES[room.kind];
   return '<div class="card"><h2>' + esc(g ? g.name + ' — Results' : 'Results') + '</h2>'
+    + (room.game.early ? '<p class="hint" style="margin:0 0 var(--sp-4)"><strong>' + esc(nickOf(room.host)) + '</strong> ended this game early — the points scored before then count.</p>' : '')
     + (g && g.results ? g.results(room, me, players) : '')
     + (iAmHost()
         ? '<div class="row-actions" style="justify-content:flex-start"><button type="button" class="primary" id="backBtn">Back to the Lobby</button></div>'
@@ -4360,22 +4437,28 @@ function renderResults() {
    countdown that looks like a broken app. */
 function renderRoom() {
   pickState();
-  const overdue = room.phase === 'play' && !iAmHost() && room.game.stepAt && room.game.stepMs
+  const out = sittingOut();
+  const paused = room.phase === 'play' && !!room.game.pausedAt;
+  const overdue = room.phase === 'play' && !paused && !iAmHost() && room.game.stepAt && room.game.stepMs
     && now() > room.game.stepAt + room.game.stepMs + HOST_OVERDUE_MS;
-  const overdueHtml = overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
+  const overdueHtml = paused
+    ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">⏸ Paused by <strong>' + esc(nickOf(room.host)) + '</strong> — the clock is stopped'
+        + (iAmHost() ? '. Press Resume on the room card to carry on.' : ' until the host carries on.') + '</p>'
+    : overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
         + esc(nickOf(room.host)) + '</strong>’s browser has not moved the game on. If they have gone, the room passes to the next player in three minutes.</p>' : '';
-  const g = room.phase === 'play' ? GAMES[room.kind] : null;
+  const g = room.phase === 'play' && !out ? GAMES[room.kind] : null;
   /* A game that draws in parts (the drawing game: a canvas mid-stroke and a
      guess box mid-word) refreshes them in place and says so; the rest of the
      room is redrawn around it. */
-  if (g && g.refresh && $('roomSide') && g.refresh(room, me, players, now())) {
+  if (g && g.refresh && $('roomSide') && g.refresh(room, me, playing(), gameNow())) {
     $('overdueSlot').innerHTML = overdueHtml;
     $('roomSide').innerHTML = renderRoomCard() + renderRoster();
     return;
   }
   const keep = keepTyping();
   let main;
-  if (room.phase === 'play') main = renderPlay();
+  if (out) main = renderLobby();
+  else if (room.phase === 'play') main = renderPlay();
   else if (room.phase === 'results') main = renderResults();
   else main = renderLobby();
   $('roomView').innerHTML = '<div class="room"><div class="mainc"><div id="overdueSlot">' + overdueHtml + '</div>'
@@ -4407,7 +4490,7 @@ function tickUI() {
   const left = $('roomLeft');
   if (left) left.textContent = fmtLeft(room.expiresAt - now());
   const g = GAMES[room.kind];
-  if (room.phase === 'play' && g && g.tick) g.tick(room, now());
+  if (room.phase === 'play' && g && g.tick && !sittingOut()) g.tick(room, gameNow());
 }
 
 /* ═══════════════════════ Entering, leaving, the engine ═══════════════════ */
@@ -4417,6 +4500,12 @@ function tickUI() {
    tested with neither Firebase nor a network. */
 let demoOn = false;
 function transport() { return demoOn ? demoSim : window.brCloud; }
+/* Every game's answer goes through here: while the game is paused nothing
+   is sent (a speed bonus is timed against the clock the pause stopped). */
+function answerGame(r, v) {
+  if (room && room.phase === 'play' && room.game.pausedAt) return Promise.reject(Object.assign(new Error('paused'), { code: 'br/paused' }));
+  return transport().answer(r, v);
+}
 
 let heartbeatTimer = null, tickTimer = null, lastWriteAt = 0, claimAskedAt = 0;
 let pushInFlight = false, pendingRev = 0, pendingSince = 0;
@@ -4459,6 +4548,42 @@ function heartbeat() {
 /* Out of a room. As the host with others online, the room is HANDED to the
    next player first, so it never waits three minutes for a handoff it could
    have had at once; as the last one out, the room is closed. */
+/* Pause and resume. The pause is the server's time on the game; resuming
+   moves the step's start on by however long it stood, so every countdown
+   picks up exactly where it stopped, on every screen. */
+function togglePause() {
+  if (!room || room.phase !== 'play' || !iAmHost()) return;
+  const g = room.game;
+  if (g.pausedAt) {
+    const stood = Math.max(0, now() - g.pausedAt);
+    pushPatch({ game: Object.assign({}, g, { stepAt: g.stepAt ? g.stepAt + stood : g.stepAt, pausedAt: 0 }) })
+      .then((ok) => { if (ok) toast('The clock is running again'); });
+  } else {
+    pushPatch({ game: Object.assign({}, g, { pausedAt: 'now' }) }).then((ok) => { if (ok) toast('Paused — the clock is stopped'); });
+  }
+}
+/* The host ends the game for everyone: straight to the results with the
+   points scored so far, through each game's own ending where it has one —
+   which is what empties the icebreakers' cards and key and the Codenames
+   key, and (the room still naming the last drawer) wipes the drawing. */
+function endGame() {
+  if (!room || room.phase !== 'play' || !iAmHost()) return;
+  const g = GAMES[room.kind];
+  if (!confirm('End ' + (g ? g.name : 'the game') + ' for everyone? The points scored so far are kept.')) return;
+  const note = { t: 'info', uid: me, text: 'the host ended the game early' };
+  const patch = g && g.end ? g.end(room, iceKey)
+    : { phase: 'results', game: Object.assign({}, room.game, { step: 'results', stepAt: 'now', stepMs: 0 }) };
+  patch.feed = (patch.feed || room.feed).concat([note]).slice(-FEED_MAX);
+  patch.game = Object.assign({}, patch.game, { pausedAt: 0, early: 1 });
+  pushPatch(patch).then((ok) => { if (ok) toast('Game over — the results are up'); });
+}
+/* Quitting a game, or coming back to it: this player's own record names the
+   game they sat out (0 = in). */
+function setOut(v) {
+  if (!room || !me) return;
+  transport().setOut(v).then(() => { if (v) toast('You’ve left the game — it carries on without you'); })
+    .catch((e) => { console.warn('quit game', e); toast(describeCloudError(e)); });
+}
 async function handHost(uid) {
   const p = players.find((x) => x.uid === uid);
   if (!p || !canHandTo(p, now())) return;
@@ -4533,9 +4658,11 @@ function hostTick() {
   if (pushInFlight) return;
   if (pendingRev && room.rev < pendingRev && Date.now() - pendingSince < 10000) return;
   if (room.phase !== 'play') return;
+  /* Paused: the engine stands still — no clock runs out, nothing moves on. */
+  if (room.game.pausedAt) return;
   const g = GAMES[room.kind];
   if (!g) return;
-  const patch = g.step(room, { answers: answers, players: players, now: t, me: me, key: iceKey });
+  const patch = g.step(room, { answers: answers, players: playing(), now: t, me: me, key: iceKey });
   if (patch) pushPatch(patch);
 }
 
@@ -4643,6 +4770,7 @@ window.brApp = {
 };
 function describeCloudError(e) {
   const code = String((e && e.code) || '');
+  if (code === 'br/paused') return 'The game is paused — wait for the host to carry on';
   if (code.indexOf('permission-denied') !== -1) return 'The cloud refused that — the room may have ended, or the rules in the console are behind';
   if (code.indexOf('unavailable') !== -1) return 'No connection to the cloud right now';
   if (code.indexOf('resource-exhausted') !== -1) return 'The free quota for today is used up — it resets tomorrow';
@@ -5104,6 +5232,7 @@ const demoSim = (() => {
   const applyPatch = (patch) => {
     const next = JSON.parse(JSON.stringify(patch));
     if (next.game && next.game.stepAt === 'now') next.game.stepAt = Date.now();
+    if (next.game && next.game.pausedAt === 'now') next.game.pausedAt = Date.now();
     Object.assign(simRoom, next);
     simRoom.rev += 1;
     return simRoom.rev;
@@ -5170,6 +5299,7 @@ const demoSim = (() => {
     clearStrokes: async (r) => { if (!simRoom) return; simStrokes = { seq: r, segs: [] }; emit(); },
     writeKey: async (k) => { if (!simRoom) return; simKey = JSON.parse(JSON.stringify(k)); },
     heartbeat: async () => { if (simPlayers[DEMO_ME]) simPlayers[DEMO_ME].seenAt = Date.now(); emit(); },
+    setOut: async (v) => { if (simPlayers[DEMO_ME]) { simPlayers[DEMO_ME].out = v; simPlayers[DEMO_ME].seenAt = Date.now(); } emit(); },
     claimHost: async () => {},
     extend: async (ms) => { simRoom.expiresAt = ms; simRoom.rev += 1; emit(); return simRoom.rev; },
     leave: async () => { stopTimers(); simRoom = null; simHouse = null; },
@@ -5465,6 +5595,10 @@ $('roomView').addEventListener('click', (e) => {
   }
   if (b.id === 'startBtn') { startGame(); return; }
   if (b.hasAttribute('data-make-host')) { handHost(b.getAttribute('data-make-host')); return; }
+  if (b.id === 'pauseBtn') { togglePause(); return; }
+  if (b.id === 'endGameBtn') { endGame(); return; }
+  if (b.id === 'quitGameBtn') { setOut(room.game.gid); return; }
+  if (b.id === 'rejoinGameBtn') { setOut(0); return; }
   if (b.id === 'backBtn') { if (iAmHost()) pushPatch({ phase: 'lobby', kind: null, game: {}, pack: null, feed: [] }); return; }
   const g = GAMES[room.kind];
   if (g && g.onClick) g.onClick(b, room, me);
@@ -5555,7 +5689,8 @@ function startGame() {
   if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
   /* A game with a key (Codenames) has it written before the room, like a
      deal's: pushPatch takes `_key` off and writes it first. */
-  const patch = { phase: 'play', kind: g.id, game: built.game, pack: built.pack || null, feed: [] };
+  const patch = { phase: 'play', kind: g.id, game: Object.assign({}, built.game, { gid: 1 + Math.floor(Math.random() * (GID_MAX - 1)), pausedAt: 0 }),
+                  pack: built.pack || null, feed: [] };
   if (built.key) patch._key = built.key;
   pushPatch(patch);
 }
@@ -5854,6 +5989,7 @@ window.__brTestHooks = {
   pushPatch: pushPatch,
   HOUSE_RE: HOUSE_RE, HOUSE_LEN: HOUSE_LEN, HOUSE_NAME_MAX: HOUSE_NAME_MAX, HOUSE_MEMBERS_MAX: HOUSE_MEMBERS_MAX,
   BOARD_MAX: BOARD_MAX, HOUSES_MAX: HOUSES_MAX, DEMO_HOUSE: DEMO_HOUSE, demoHouse: demoHouse,
+  GID_MAX: GID_MAX, inGame: inGame, playing: playing, gameNow: gameNow, answerGame: answerGame,
   randomHouseCode: randomHouseCode, cleanHouseName: cleanHouseName, normalizeHouse: normalizeHouse,
   normalizeUserDoc: normalizeUserDoc, houseRoomLive: houseRoomLive, houseTally: houseTally,
   houseRecorder: houseRecorder, boardRows: boardRows, parseHouseHash: parseHouseHash, houseLink: houseLink,
@@ -5983,7 +6119,7 @@ function forCloud(patch) {
   Object.keys(patch).forEach((k) => {
     const v = patch[k];
     if (k === 'expiresAt' && typeof v === 'number') out[k] = ts(v);
-    else if (k === 'stepAt' && v === 'now') out[k] = F.serverTimestamp();
+    else if ((k === 'stepAt' || k === 'pausedAt') && v === 'now') out[k] = F.serverTimestamp();
     else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = forCloud(v);
     else out[k] = v;
   });
@@ -6600,6 +6736,12 @@ async function leave(opts) {
   if (o.closeRoom) { try { await F.deleteDoc(roomRef(code)); } catch (e) { /* somebody else took it */ } }
 }
 
+/* Quitting the game on (v = its gid) or rejoining it (0): the player's own
+   record, with the fresh sentinel every write to it must carry. */
+async function setOut(v) {
+  if (!user || !listening) return;
+  await F.updateDoc(playerRef(listening, user.uid), { out: v, seenAt: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
+}
 /* Handing the seat on while staying: the host-only listeners go FIRST, as
    in leave(), so the rules' refusal of this browser's next read never
    reaches the console. */
@@ -6614,7 +6756,7 @@ window.brCloud = {
   uid: () => (user ? user.uid : null),
   create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
   strokes: strokes, clearStrokes: clearStrokes, writeKey: writeKey,
-  claimHost: claimHost, extend: extend, leave: leave, handHost: handHost,
+  claimHost: claimHost, extend: extend, leave: leave, handHost: handHost, setOut: setOut,
   listen: listenTo, stop: stopListening,
   /* M6 */
   google: () => isGoogle(user), signIn: requireSignIn, signOut: signOut, saveNick: saveNick,

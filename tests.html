@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 231;
+const EXPECTED = 238;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -581,7 +581,7 @@ function define() {
     eq(p[3].nick.length, H.NICK_MAX, 'a nickname is sliced');
     eq(p[3].ansR, 3, 'ansR coerced');
     eq(p[3].hue, 11, 'hue clamped to 0..11');
-    eq(Object.keys(p[0]).sort(), ['ansR', 'hue', 'joinedAt', 'nick', 'seenAt', 'uid'], 'and nothing else survives');
+    eq(Object.keys(p[0]).sort(), ['ansR', 'hue', 'joinedAt', 'nick', 'out', 'seenAt', 'uid'], 'and nothing else survives — `out` is in firestore.rules’ validPlayer too');
     eq(H.normalizePlayers([{ uid: U.b, nick: '' }])[0].nick, 'Someone', 'an empty nickname reads as Someone rather than as nothing');
   });
   t('an answer is a short string, an int or up to three short strings', () => {
@@ -1293,7 +1293,7 @@ function define() {
     ok(/if \(cur\.host !== user\.uid && !\(patch\.host === user\.uid\)\) throw/.test(mod), 'and refuses if the seat is not mine');
     ok(/tx\.update\(roomRef\(code\), Object\.assign\(forCloud\(patch\), \{ rev: rev \}\)\)/.test(mod), 'and writes rev + 1');
     ok(/if \(s\.metadata\.hasPendingWrites\) return;/.test(mod), 'a local echo is never adopted as the room');
-    ok(/stepAt' && v === 'now'\) out\[k\] = F\.serverTimestamp\(\)/.test(mod), 'stepAt is the server’s clock, never the host’s');
+    ok(/\(k === 'stepAt' \|\| k === 'pausedAt'\) && v === 'now'\) out\[k\] = F\.serverTimestamp\(\)/.test(mod), 'stepAt — and a pause — are the server’s clock, never the host’s');
     ok(/seenAt: F\.serverTimestamp\(\)/.test(mod) && /at: F\.serverTimestamp\(\)/.test(mod), 'and so are presence and an answer’s time');
   });
   t('the host loop pushes once and waits for its snapshot', () => {
@@ -1301,7 +1301,7 @@ function define() {
     ok(/if \(pushInFlight\) return;/.test(src), 'one push at a time');
     ok(/if \(pendingRev && room\.rev < pendingRev && Date\.now\(\) - pendingSince < 10000\) return;/.test(src),
        'and nothing more until the room comes back at the new rev — step() is pure on the room it sees');
-    ok(/g\.step\(room, \{ answers: answers, players: players, now: t, me: me, key: iceKey \}\)/.test(src), 'step() is called with the corrected clock');
+    ok(/g\.step\(room, \{ answers: answers, players: playing\(\), now: t, me: me, key: iceKey \}\)/.test(src), 'step() is called with the corrected clock, and only the players still in the game');
   });
   t('a stale host is replaced by the longest-present online player, once', () => {
     const src = stripComments(APP_SRC);
@@ -1507,7 +1507,7 @@ function define() {
     eq(r.game.order, [59, 0, 2], 'order indexes clamped to the pack cap');
     eq(r.game.secs, 120, 'seconds clamped');
     eq(r.game.correct, 3, 'correct clamped');
-    eq(Object.keys(r.game).sort(), ['correct', 'counts', 'gained', 'n', 'order', 'packId', 'qi', 'round', 'secs', 'step', 'stepAt', 'stepMs'], 'and nothing else');
+    eq(Object.keys(r.game).sort(), ['correct', 'counts', 'early', 'gained', 'gid', 'n', 'order', 'packId', 'pausedAt', 'qi', 'round', 'secs', 'step', 'stepAt', 'stepMs'], 'and nothing else');
   });
 
   group('trivia: what a player sees');
@@ -1873,7 +1873,7 @@ function define() {
     eq([g.seen, g.got], [{ [U.b]: 2 }, { [U.b]: 1000 }], 'maps keyed by uid and clamped');
     eq(g.used, [H.DRAW_WORDS.length - 1, 0, 2], 'used indexes clamped to the list');
     eq([g.rounds, g.secs, g.ti], [3, 30, H.PLAYERS_MAX - 1], 'numbers clamped');
-    eq(Object.keys(g).sort(), ['drawer', 'gained', 'got', 'hints', 'order', 'pass', 'round', 'rounds', 'secs', 'seed', 'seen', 'shape',
+    eq(Object.keys(g).sort(), ['drawer', 'early', 'gained', 'gid', 'got', 'hints', 'order', 'pass', 'pausedAt', 'round', 'rounds', 'secs', 'seed', 'seen', 'shape',
       'step', 'stepAt', 'stepMs', 'ti', 'turns', 'used', 'word', 'wordHash'], 'and nothing else');
     ok(!('words' in g) && !('cards' in g), 'never the two keys the rules size-check for the later games');
   });
@@ -2714,6 +2714,106 @@ function define() {
     ok(!/\.data\(\)\.expiresAt/.test(mod), 'no Timestamp is ever read raw');
     ok(/if \(h\.room !== code\) return;\s*tx\.update\(houseRef\(id\), \{ room: null, roomExp: 0,/.test(mod), 'closing clears only the room the house still names');
     ok(/const h = closeRoom && !demoOn && room && room\.house \? houses\[room\.house\] : null;[\s\S]{0,200}closeHouseRoom\(h\.id, code\)/.test(APP_SRC), 'the last one out clears it from the house');
+  });
+
+  group('quitting, pausing and ending a game');
+  /* A game with an id: Ben has quit it (his `out` names it); Cat's `out`
+     names an OLD game, so she is in this one. */
+  const GID = 424242;
+  const quitPlayers = () => fixturePlayers().map((p) => Object.assign({}, p,
+    p.uid === U.b ? { out: GID } : p.uid === U.c ? { out: GID - 1 } : {}));
+  const trivPlay = (over) => fixtureRoom({ phase: 'play', kind: 'trivia',
+    game: Object.assign({ step: 'ask', stepAt: T0, stepMs: 20000, round: 1, qi: 0, order: [0, 1, 2], n: 3, secs: 20, packId: 'general',
+      correct: null, counts: null, gained: null, gid: GID }, over || {}) });
+  const inGameAs = (asUid, raw) => { H.__setOffset(T0 - Date.now()); H.__setMe(asUid); H.__plantRoom(raw); H.__plantPlayers(quitPlayers()); };
+  t('a quitter is out of THIS game only, and the engines are handed everyone else', () => {
+    try {
+    inGameAs(U.host, trivPlay());
+    eq(H.playing().map((p) => p.uid), [U.host, U.c], 'Ben quit this game; Cat quit an old one and is in');
+    ok(!H.inGame({ uid: U.b, out: GID }, { gid: GID }) && H.inGame({ uid: U.b, out: GID }, { gid: GID + 1 }), 'a new game has a new id, so everyone is in again');
+    ok(H.inGame({ uid: U.b, out: 0 }, { gid: 0 }), 'a game with no id (an older page started it) counts nobody out');
+    const r = H.normalizeRoom(trivPlay());
+    ok(H.GAMES.trivia.step(r, { answers: [{ uid: U.host, r: 1, v: 0, at: T0 + 1000 }], players: H.playing(), now: T0 + 2000 }),
+       'trivia reveals once everyone still IN has answered — nobody waits for the quitter');
+    } finally { home(); }
+  });
+  t('the quitter sees the lobby with the way back in; everyone sees who is sitting out', () => {
+    try {
+    const D = W.document;
+    inGameAs(U.b, trivPlay());
+    const view = D.getElementById('roomView').textContent;
+    ok(/You’ve left this game/.test(view) && D.getElementById('rejoinGameBtn'), 'Ben has the lobby and Rejoin the Game');
+    ok(D.getElementById('pickKind') && !D.getElementById('startBtn'), 'he can look through the games, and start none');
+    ok(!D.getElementById('quitGameBtn'), 'and nothing to quit');
+    ok(/sitting out/.test(D.querySelector('.roster li[data-uid="' + U.b + '"]').textContent), 'the roster says he is sitting out');
+    inGameAs(U.b, trivPlay({ step: 'results' }));
+    H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', game: { step: 'results', gid: GID } }));
+    ok(/See the Results/.test(D.getElementById('rejoinGameBtn').textContent), 'at the results his way back is to see them');
+    inGameAs(U.host, trivPlay());
+    ok(!/sitting out/.test(D.querySelector('.roster li[data-uid="' + U.c + '"]').textContent), 'an old game’s quit says nothing now');
+    } finally { home(); }
+  });
+  t('the game buttons: the host pauses and ends; anyone quits; at the results a player goes back to the lobby', () => {
+    try {
+    const D = W.document;
+    const ids = () => ['pauseBtn', 'endGameBtn', 'quitGameBtn'].filter((id) => D.getElementById(id));
+    inGameAs(U.host, trivPlay());
+    eq(ids(), ['pauseBtn', 'endGameBtn', 'quitGameBtn'], 'the host, mid-game');
+    inGameAs(U.d, trivPlay());
+    H.__plantPlayers(quitPlayers().concat([{ uid: U.d, nick: 'Dee', joinedAt: T0 - 30000, seenAt: T0 - 500, ansR: 0, hue: 3 }]));
+    eq(ids(), ['quitGameBtn'], 'a player, mid-game');
+    H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', game: { step: 'results', gid: GID } }));
+    eq(ids(), ['quitGameBtn'], 'a player at the results');
+    eq(D.getElementById('quitGameBtn').textContent, 'Back to the Lobby', 'named for where it goes');
+    H.__setMe(U.host);
+    eq(ids(), [], 'the host at the results already has Back to the Lobby for everyone');
+    H.__plantRoom(fixtureRoom());
+    eq(ids(), [], 'none in the lobby');
+    } finally { home(); }
+  });
+  t('a paused game stands still: frozen countdowns, a banner, no answers sent, the engine idle', async () => {
+    try {
+    const D = W.document;
+    inGameAs(U.host, trivPlay({ pausedAt: T0 + 5000 }));
+    H.__setOffset(T0 + 60000 - Date.now());   /* a minute later — past the 20 s clock */
+    eq(H.gameNow(), T0 + 5000, 'the game’s clock is the moment it was paused');
+    ok(/Paused by Ada/.test(D.getElementById('overdueSlot').textContent), 'everyone is told');
+    eq(D.getElementById('pauseBtn').textContent, '▶ Resume', 'the host can carry on');
+    let code = '';
+    await H.answerGame(1, 0).catch((e) => { code = e.code; });
+    eq(code, 'br/paused', 'an answer is held back, not sent');
+    ok(/if \(room\.game\.pausedAt\) return;\s*const g = GAMES\[room\.kind\];\s*if \(!g\) return;\s*const patch = g\.step\(/.test(APP_SRC), 'the host’s engine does not step a paused game');
+    ok(/stepAt: g\.stepAt \? g\.stepAt \+ stood : g\.stepAt, pausedAt: 0/.test(APP_SRC), 'resuming moves the step on by however long it stood');
+    H.__setMe(U.c);
+    ok(!/has not moved the game on/.test(D.getElementById('overdueSlot').textContent), 'and a paused game is never “overdue”');
+    } finally { home(); }
+  });
+  t('ending early goes through each game’s own ending, so nothing private is left in the cloud', () => {
+    const ice = ICE.end(H.normalizeRoom(dealt()));
+    eq(ice.phase, 'results', 'icebreakers: to the results');
+    eq(ice._key, { n: '', a: [], l: [] }, 'with the author map emptied');
+    eq(ice.game.cards, [], 'and the cards cleared');
+    const cn = CN.end(H.normalizeRoom(cnRoom()), CN_KEY);
+    eq([cn.phase, cn.game.winner, cn.game.why], ['results', '', 'ended'], 'Codenames: no winner, ended');
+    eq(cn._key, { n: '', c: [] }, 'with the key emptied');
+    ok(cn.game.colors && cn.game.colors.length === 25, 'and the board shown');
+    ok(/patch\.game = Object\.assign\(\{\}, patch\.game, \{ pausedAt: 0, early: 1 \}\);/.test(APP_SRC), 'an ended game is never left paused, and is marked as ended early');
+    eq(H.normalizeRoom(cnRoom({ why: 'ended' })).game.why, 'ended', 'Codenames keeps the reason, so its results say the host ended it');
+    ok(/game: Object\.assign\(\{\}, built\.game, \{ gid: 1 \+ Math\.floor\(Math\.random\(\) \* \(GID_MAX - 1\)\), pausedAt: 0 \}\)/.test(APP_SRC), 'every new game gets its own id');
+  });
+  t('a drawer who quits passes the turn at once', () => {
+    const list = drawPlayers().filter((p) => p.uid !== U.host);
+    const patch = DRAW.step(H.normalizeRoom(drawing()), dctx([], T0 + 1000, list));
+    ok(patch && patch.game.step === 'pick' && patch.game.drawer !== U.host, 'the next drawer picks, with time to spare on the old clock');
+    ok(patch.feed.some((f) => f.uid === U.host && f.text === 'left the game'), 'and the feed says why');
+    eq(DRAW.step(H.normalizeRoom(drawing()), dctx([], T0 + 1000)), null, 'with the drawer still in, nothing changes');
+  });
+  t('`out` is a capped number in the rules, mirrored by GID_MAX', () => {
+    const r = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(/hasOnly\(\['nick', 'joinedAt', 'seenAt', 'ansR', 'hue', 'expiresAt', 'out'\]\)/.test(r), 'validPlayer allows it');
+    ok(new RegExp("d\\.out is int && d\\.out >= 0 && d\\.out <= " + H.GID_MAX).test(r), 'as an int no bigger than GID_MAX');
+    ok(H.SCHEMA >= 6, 'a room carrying a pause halts an older page rather than have its host strip it');
+    eq(H.normalizePlayers([{ uid: U.b, nick: 'B', out: '<b>' }])[0].out, 0, 'and anything else is no quit at all');
   });
 
   group('houses: what a reader sees');
