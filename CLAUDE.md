@@ -100,7 +100,9 @@ in two real browsers (the desktop app's pane and Charles's Chrome, two anonymous
 creates, B joins by the `#join=` link with the fragment stripped and the code in the box,
 both see each other within a second; a ten-question game with answers from both sides,
 scored 133 and 111 by server time; the host reloads mid-game and rejoins as host with the
-game still moving (rev went on without a gap). **Not on Spark: the four TTL policies and
+game still moving (rev went on without a gap); the host's tab closed for three minutes, and B's
+browser claimed the seat through the handoff clause and ran the game to Results. The hidden-tab
+countdown is pinned by a test and not yet watched on a real backgrounded tab. **Not on Spark: the four TTL policies and
 the budget alert** — both need Blaze. The README's checklist says what that costs (abandoned
 rooms are not deleted; everything else is). Two paste lessons: `firestore.rules` is
 ASCII-only because the console editor mangled UTF-8 punctuation; and every answer button

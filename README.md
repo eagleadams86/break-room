@@ -149,8 +149,10 @@ Healthy: a JSON body whose `authorizedDomains` includes `eagleadams86.github.io`
 **First real run, 27 October 2026:** a room opened from one browser and joined from another
 by its invite link, both anonymous; a ten-question game with answers from both sides scored
 by the server's clock (133 and 111 after one question each); the host's page reloaded
-mid-game and rejoined as host with the game still moving. The three-minute handoff and the
-hidden-tab countdown were checked the same afternoon — see `CLAUDE.md`.
+mid-game and rejoined as host with the game still moving; and when the host's tab was closed
+for three minutes, the other player's browser took the seat and ran the rest of the game.
+The hidden-tab countdown is pinned by a test but has not yet been watched on a real
+backgrounded tab.
 
 ## Testing It With More Than One Person
 
