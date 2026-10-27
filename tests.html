@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 131;
+const EXPECTED = 163;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -1551,6 +1551,419 @@ function define() {
       ok(/Mine/.test(D.getElementById('packList').textContent), 'listing the pack');
       D.getElementById('packDialog').close();
     } finally { home(); H.__plantLocal(FIXTURE_LOCAL); }
+  });
+
+
+  /* ═══════════════════════════ Drawing & guess ═══════════════════════════ */
+  const DRAW = H.GAMES.draw;
+  const SEED = '0123456789abcdef';
+  const drawGame = (over) => Object.assign({ step: 'draw', stepAt: T0, stepMs: 75000, round: 1, turns: 1, order: [U.host, U.b, U.c, U.d],
+    ti: 0, pass: 1, rounds: 1, secs: 75, drawer: U.host, seed: SEED, wordHash: '', shape: '', hints: [], seen: {}, got: {},
+    gained: null, word: '', used: [] }, over || {});
+  const drawRoom = (game, scores, feed) => fixtureRoom({ phase: 'play', kind: 'draw', scores: scores || {}, feed: feed || [], game: drawGame(game) });
+  /* Four players: Ada (host, drawing first), Ben and Dee online, Cat away. */
+  const drawPlayers = () => fixturePlayers().concat([{ uid: U.d, nick: 'Dee', joinedAt: T0 - 30000, seenAt: T0 - 500, ansR: 0, hue: 3 }]);
+  const dctx = (answers, t, list) => ({ answers: answers, players: list || drawPlayers(), now: t });
+  /* The word Ada is offered first in round 1, and her pick of it. */
+  const G1 = H.normalizeRoom(drawRoom({ step: 'pick', stepMs: 10000 })).game;
+  const WORD = H.choicesFor(G1, U.host)[0];
+  const letters = WORD.split('').map((ch, i) => (ch === ' ' ? -1 : i)).filter((i) => i >= 0);
+  const PICK_V = H.encodePick(WORD, G1, letters.length >= 6 ? [letters[0], letters[2]] : letters.length >= 3 ? [letters[0]] : []);
+  const HASH = H.hashWord(SEED, 1, WORD);
+  const WRONG = H.DRAW_WORDS.find((w) => H.wordKey(w) !== H.wordKey(WORD) && WORD.indexOf(w) === -1 && w.indexOf(' ') === -1);
+  const drawing = (over, scores, feed) => drawRoom(Object.assign({ wordHash: HASH, shape: H.wordShape(WORD) }, over || {}), scores, feed);
+  const pickAns = { uid: U.host, r: 1, v: PICK_V, at: T0 - 2000 };
+
+  group('drawing: the word list, the hash and the codec');
+  t('SHA-256 is the real thing — known vectors, and crypto.subtle on a long UTF-8 string', async () => {
+    eq(H.sha256Hex(''), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'the empty string');
+    eq(H.sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'abc');
+    const long = 'Café ☕ '.repeat(40) + 'x';   /* several 64-byte blocks, and multi-byte characters */
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(long));
+    eq(H.sha256Hex(long), [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join(''), 'and the browser agrees');
+  });
+  t('the word list is drawable words, lower case, unique once folded to letters', () => {
+    ok(H.DRAW_WORDS.length >= 500, 'enough that a night rarely repeats', H.DRAW_WORDS.length);
+    const bad = H.DRAW_WORDS.filter((w) => !/^[a-z]+(?: [a-z]+){0,3}$/.test(w) || w.length > 30);
+    eq(bad, [], 'letters and single spaces only — the room’s `word` field refuses anything else');
+    const keys = H.DRAW_WORDS.map(H.wordKey);
+    eq(keys.filter((k, i) => keys.indexOf(k) !== i), [], 'no two words the same once spaces are dropped — "ice cream" and "icecream" would be one guess');
+  });
+  t('a guess matches on letters only, and inside a sentence', () => {
+    const h = H.hashWord(SEED, 3, 'ice cream');
+    ok(H.guessMatches(SEED, 3, h, 'Ice-Cream!'), 'case, hyphen and punctuation folded');
+    ok(H.guessMatches(SEED, 3, h, 'is it ice cream?'), 'a right answer wrapped in a question still scores — or it would go in the feed for everyone');
+    ok(H.guessMatches(SEED, 3, H.hashWord(SEED, 3, 'cafe'), 'Café'), 'accents folded');
+    ok(!H.guessMatches(SEED, 3, H.hashWord(SEED, 3, 'cat'), 'category'), 'but a word inside another word is not the word');
+    ok(!H.guessMatches(SEED, 4, h, 'ice cream'), 'and the round is in the hash, so last turn’s guess cannot score');
+  });
+  t('the three choices are the same for drawer, reloaded drawer and host — and skip used words', () => {
+    const a = H.choicesFor(G1, U.host), b = H.choicesFor(H.normalizeRoom(drawRoom({ step: 'pick' })).game, U.host);
+    eq(a, b, 'deterministic from seed, round and drawer');
+    eq(new Set(a).size, 3, 'three different words');
+    ok(a.every((w) => H.DRAW_WORDS.indexOf(w) !== -1), 'from the list');
+    const used = a.map((w) => H.DRAW_WORDS.indexOf(w));
+    const c = H.choicesFor(Object.assign({}, G1, { used: used }), U.host);
+    ok(c.every((w) => a.indexOf(w) === -1), 'a word drawn tonight is not offered again');
+    ok(H.choicesFor(Object.assign({}, G1, { round: 2 }), U.host).join() !== a.join(), 'a new round is new words');
+  });
+  t('the drawer’s pick carries a hash, the shape and the hint letters — never the word', () => {
+    const p = H.parsePick(PICK_V);
+    ok(p, 'it parses');
+    eq(p.hash, HASH, 'the hash');
+    eq(p.shape, H.wordShape(WORD), 'the shape');
+    ok(PICK_V.indexOf(WORD) === -1 || WORD.length < 3, 'and the word itself is not in it');
+    const longest = H.DRAW_WORDS.reduce((m, w) => (w.length > m.length ? w : m), '');
+    ok(H.encodePick(longest, G1).length <= 120, 'the longest word still fits the rules’ 120', H.encodePick(longest, G1).length);
+    eq(H.parsePick('P|' + 'a'.repeat(63) + '|5|'), null, 'a short hash');
+    eq(H.parsePick('P|' + HASH + '|5|1A'), null, 'an upper-case hint');
+    eq(H.parsePick('P|' + HASH + '|5|<b>'), null, 'markup');
+    eq(H.parsePick(7), null, 'a number');
+  });
+  t('the blanks show the shape and the given-away letters', () => {
+    eq(H.blanksFor('3-5', []), '___ _____');
+    eq(H.blanksFor('3-5', ['1c', '5z']), '_c_ _z___', 'letters in place');
+    eq(H.blanksFor('3', ['3x']), '___', 'a hint off the end does nothing');
+    eq(H.blanksFor('<x>', []), '', 'junk is nothing');
+  });
+  t('a guess is capped, stripped of control characters, and numbered', () => {
+    eq(H.encodeGuess(3, '  Ice\u0000cream  '), 'G|3|Ice cream', 'cleaned');
+    eq(H.cleanGuess('x'.repeat(200)).length, H.GUESS_MAX, 'capped at the feed’s 40');
+    eq(H.encodeGuess(1, '   '), null, 'nothing is not a guess');
+    eq(H.parseGuess('G|12|a cat'), { n: 12, text: 'a cat' });
+    eq(H.parseGuess('G|1|' + 'x'.repeat(41)), null, 'over the cap is refused, not sliced');
+    eq(H.parseGuess('X|1|cat'), null, 'and anything else is nothing');
+  });
+  t('a segment survives the round trip, and a malformed one is dropped', () => {
+    const s = H.encodeSeg(7, 3, 2, [[0, 0], [1000, 1000], [12, 345]]);
+    eq(s, '7:3:2:0,0 1000,1000 12,345');
+    eq(H.parseSeg(s), { n: 7, c: 3, w: 2, pts: [[0, 0], [1000, 1000], [12, 345]] });
+    eq(H.parseSeg(H.encodeSeg(1, H.ERASER, 4, [[5, 5]])).c, H.ERASER, 'the eraser, a dot');
+    [
+      ['1:6:2:1,1', 'a colour that does not exist'], ['1:0:0:1,1', 'width 0'], ['1:0:5:1,1', 'width 5'],
+      ['1:0:2:1001,5', 'off the grid'], ['1:0:2:1,1 ', 'a trailing space'], ['1:0:2:', 'no points'],
+      ['x:0:2:1,1', 'no counter'], ['1:0:2:1,1<script>', 'markup'], ['1:0:2:-1,5', 'a negative'],
+      ['1:0:2:' + Array.from({ length: H.SEG_PTS_MAX + 1 }, () => '1,1').join(' '), 'one point too many'],
+    ].forEach(([bad, why]) => eq(H.parseSeg(bad), null, why));
+    eq(H.parseSeg({ n: 1 }), null, 'not a string');
+  });
+  t('the strokes document is rebuilt: junk dropped, duplicates dropped, in order, capped at the rules’ 400', () => {
+    const segs = ['3:0:1:1,1', '1:0:1:2,2', 'junk', '3:0:1:9,9', 42].concat(Array.from({ length: 500 }, (_, i) => H.encodeSeg(10 + i, 0, 1, [[i % 1000, 1]])));
+    const s = H.normalizeStrokes({ seq: '4', segs: segs, extra: 'no' });
+    eq(s.seq, 4, 'the round, coerced');
+    eq(s.segs.slice(0, 2).map((x) => x.n), [1, 3], 'sorted by counter, the second n=3 dropped');
+    ok(s.segs.length <= H.SEGS_MAX, 'never more than the rules allow', s.segs.length);
+    eq(Object.keys(s).sort(), ['segs', 'seq'], 'nothing else');
+    eq(H.normalizeStrokes(null), { seq: 0, segs: [] }, 'nothing is an empty canvas');
+  });
+  t('two identical strokes are two different strings — arrayUnion cannot merge them', () => {
+    const sent = [];
+    let clock = 0;
+    const co = H.makeCoalescer({ clock: () => clock, ms: 400, send: (l) => sent.push(...l) });
+    co.down(10, 10, 0, 2); co.move(50, 50); co.up();
+    co.down(10, 10, 0, 2); co.move(50, 50); co.up();
+    co.tick();
+    eq(sent.length, 2, 'two segments');
+    ok(sent[0] !== sent[1], 'with different strings', sent.join(' / '));
+    eq(sent.map((s) => H.parseSeg(s).n), [1, 2], 'because the counter goes up');
+    co.reset(co.next());
+    co.down(10, 10, 0, 2); co.move(50, 50); co.up();
+    clock = 1000; co.tick();
+    eq(sent.length, 3, 'the stroke after a Clear went too');
+    eq(new Set(sent).size, sent.length, 'and a Clear does not restart the counter', sent.join(' / '));
+  });
+  t('the coalescer sends at most every 400 ms on a fake clock, and a cut stroke has no gap', () => {
+    let clock = 0;
+    const sends = [];
+    const co = H.makeCoalescer({ clock: () => clock, ms: H.FLUSH_MS, send: (l) => sends.push({ at: clock, segs: l.map(H.parseSeg) }) });
+    co.down(0, 500, 1, 2);
+    for (clock = 0; clock <= 3000; clock += 50) {
+      co.move(Math.round(clock / 4), 500);   /* 12.5 grid units every 50 ms */
+      if (clock % 100 === 0) co.tick();
+    }
+    co.up();
+    const gaps = sends.slice(1).map((s, i) => s.at - sends[i].at);
+    ok(gaps.every((g) => g >= H.FLUSH_MS), 'never two sends inside 400 ms', gaps.join(','));
+    ok(sends.length >= 7 && sends.length <= 8, 'about one every 400 ms of drawing', sends.length);
+    const all = [].concat(...sends.map((s) => s.segs));
+    for (let i = 1; i < all.length; i++) eq(all[i].pts[0], all[i - 1].pts[all[i - 1].pts.length - 1], 'segment ' + i + ' starts where the last ended');
+    const before = sends.length;
+    clock += 100; co.tick();
+    eq(sends.length, before, 'the end of a stroke waits for the 400 ms too');
+    clock += 400; co.tick();
+    eq(sends.length, before + 1, 'and then goes');
+    clock += 2000; eq(co.tick(), false, 'an idle canvas sends nothing');
+  });
+  t('a tap is a dot, and a long stroke is cut at the points cap', () => {
+    const sent = [];
+    const co = H.makeCoalescer({ clock: () => 0, ms: 400, send: (l) => sent.push(...l.map(H.parseSeg)) });
+    co.down(300, 300, 0, 3); co.up(); co.tick();
+    eq(sent[0].pts, [[300, 300]], 'one point');
+    sent.length = 0;
+    const co2 = H.makeCoalescer({ clock: () => 0, ms: 400, send: (l) => sent.push(...l.map(H.parseSeg)) });
+    co2.down(0, 0, 0, 1);
+    for (let i = 1; i <= 150; i++) co2.move(i * 5, 0);
+    co2.up(); co2.tick();
+    ok(sent.length >= 3, 'cut into several', sent.length);
+    ok(sent.every((s) => s.pts.length <= H.SEG_PTS_MAX), 'none over the cap');
+  });
+  t('the read estimate grows with players and rounds, and is pinned', () => {
+    eq(H.drawCost(8, 1, 75), 8 * 8 * (113 + 24 + 8), 'eight players, one round');
+    ok(H.drawCost(12, 3, 75) > H.FREE_READS, 'three rounds of twelve is past the free plan — the lobby says so');
+    ok(H.drawCost(4, 1, 75) < H.drawCost(4, 2, 75) && H.drawCost(4, 1, 60) < H.drawCost(4, 1, 90), 'more rounds or seconds, more reads');
+  });
+
+  group('drawing: the engine is a pure step()');
+  t('setup needs two people online, and the order is the online players', () => {
+    eq(!!DRAW.setup({}, [fixturePlayers()[0], fixturePlayers()[2]], {}, T0).error, true, 'Ada alone (Cat is away) cannot play');
+    const b = DRAW.setup({ rounds: '2', dsecs: '60' }, drawPlayers(), {}, T0);
+    eq(b.game.order.slice().sort(), [U.host, U.b, U.d].sort(), 'Cat, away, is not in the order');
+    eq([b.game.step, b.game.stepAt, b.game.stepMs, b.game.round, b.game.drawer, b.game.rounds, b.game.secs],
+       ['pick', 'now', H.PICK_MS, 1, b.game.order[0], 2, 60]);
+    ok(/^[0-9a-f]{16}$/.test(b.game.seed), 'a seed for the choices and the hash');
+    eq(DRAW.setup({ rounds: '9', dsecs: '5' }, drawPlayers(), {}, T0).game.rounds, 3, 'rounds clamped');
+  });
+  t('a pick moves to drawing with the hash and shape — and only the drawer’s pick counts', () => {
+    const r = H.normalizeRoom(drawRoom({ step: 'pick', stepMs: 10000 }));
+    eq(DRAW.step(r, dctx([], T0 + 3000)), null, 'nothing yet');
+    eq(DRAW.step(r, dctx([Object.assign({}, pickAns, { uid: U.b })], T0 + 3000)), null, 'Ben is not drawing');
+    eq(DRAW.step(r, dctx([Object.assign({}, pickAns, { r: 0 })], T0 + 3000)), null, 'last round’s pick');
+    const p = DRAW.step(r, dctx([pickAns], T0 + 3000));
+    eq([p.game.step, p.game.stepAt, p.game.stepMs, p.game.wordHash, p.game.shape, p.game.word], ['draw', 'now', 75000, HASH, H.wordShape(WORD), '']);
+    ok(JSON.stringify(p).indexOf('"' + WORD + '"') === -1, 'the word is nowhere in the patch');
+  });
+  t('a drawer who never picks is skipped after the grace, with a line in the feed', () => {
+    const r = H.normalizeRoom(drawRoom({ step: 'pick', stepMs: 10000 }));
+    eq(DRAW.step(r, dctx([], T0 + 10000 + H.PICK_GRACE_MS - 1)), null, 'not inside the grace');
+    const p = DRAW.step(r, dctx([], T0 + 10000 + H.PICK_GRACE_MS));
+    eq([p.game.step, p.game.drawer, p.game.round, p.game.turns], ['pick', U.b, 2, 2], 'Ben’s turn');
+    eq(p.feed, [{ t: 'info', uid: U.host, text: 'didn’t pick a word' }]);
+  });
+  t('a right guess scores by server time and pays the drawer; it is never in the feed', () => {
+    const r = H.normalizeRoom(drawing({}, { [U.host]: 10 }));
+    const p = DRAW.step(r, dctx([pickAns,
+      { uid: U.b, r: 1, v: 'G|1|' + WORD.toUpperCase(), at: T0 + 15000 },   /* 60 s of 75 left: 100 + 80 */
+      { uid: U.d, r: 1, v: 'G|1|' + WRONG, at: T0 + 5000 }], T0 + 16000));
+    eq(p.game.got, { [U.b]: 180 }, 'Ben got it');
+    eq(p.scores, { [U.host]: 10 + H.DRAWER_PTS, [U.b]: 180 }, 'and Ada earns 50 for drawing it');
+    eq(p.game.seen, { [U.b]: 1, [U.d]: 1 }, 'both guesses read');
+    eq(p.feed.map((f) => [f.t, f.uid, f.text]), [['got', U.b, ''], ['guess', U.d, WRONG]], 'Ben shows as “got it”, Dee’s wrong guess in full');
+    ok(JSON.stringify(p.feed).toLowerCase().indexOf(H.wordKey(WORD)) === -1 || H.wordKey(WORD).length < 3, 'the word is not in the feed');
+    eq(p.game.step, 'draw', 'Dee is still guessing, so the turn goes on');
+  });
+  t('a guess already read, a guess for another turn and a second right guess change nothing', () => {
+    const r = H.normalizeRoom(drawing({ seen: { [U.b]: 1, [U.d]: 2 }, got: { [U.b]: 180 } }));
+    eq(DRAW.step(r, dctx([pickAns,
+      { uid: U.b, r: 1, v: 'G|1|' + WORD, at: T0 + 15000 },
+      { uid: U.d, r: 1, v: 'G|2|' + WRONG, at: T0 + 5000 },
+      { uid: U.d, r: 0, v: 'G|9|' + WORD, at: T0 }], T0 + 20000)), null, 'nothing new');
+    const p = DRAW.step(r, dctx([pickAns, { uid: U.b, r: 1, v: 'G|2|' + WORD, at: T0 + 25000 }], T0 + 26000));
+    eq(p.game.got, { [U.b]: 180 }, 'Ben scores once');
+    eq(p.feed, [], 'and his second right guess is not shown either');
+  });
+  t('the hint letters come out at 40% and 67% of the time, and no more than were sent', () => {
+    const r = H.normalizeRoom(drawing());
+    const pool = H.parsePick(PICK_V).hints;
+    eq(DRAW.step(r, dctx([pickAns], T0 + 29000)), null, 'none before 30 s');
+    const p1 = DRAW.step(r, dctx([pickAns], T0 + 30000));
+    eq(p1 ? p1.game.hints : [], pool.slice(0, 1), 'the first at 30 s');
+    const r2 = H.normalizeRoom(drawing({ hints: pool.slice(0, 1) }));
+    const p2 = DRAW.step(r2, dctx([pickAns], T0 + 50100));
+    eq(p2 ? p2.game.hints : pool.slice(0, 1), pool.slice(0, 2), 'the second at 50 s, when the word has one');
+    eq(H.normalizeRoom(drawing({ hints: ['1a', '2b', '3c'] })).game.hints.length, 2, 'the room never holds more than two');
+  });
+  t('the turn ends when every online guesser has it — Cat, away, is not waited for — or at time up', () => {
+    const r = H.normalizeRoom(drawing({ got: { [U.b]: 180 }, seen: { [U.b]: 1 } }, { [U.b]: 180, [U.host]: 50 }));
+    const p = DRAW.step(r, dctx([pickAns, { uid: U.d, r: 1, v: 'G|1|' + WORD, at: T0 + 37500 }], T0 + 38000));
+    eq(p.game.step, 'turnEnd', 'Dee was the last one');
+    eq(p.game.word, WORD, 'and the word is on the room at last');
+    eq(p.game.gained, { [U.b]: 180, [U.d]: 150, [U.host]: 2 * H.DRAWER_PTS }, 'what the turn paid');
+    eq(p.game.used, [H.DRAW_WORDS.indexOf(WORD)], 'and it is not offered again');
+    const late = DRAW.step(H.normalizeRoom(drawing()), dctx([pickAns], T0 + 75000));
+    eq([late.game.step, late.game.gained], ['turnEnd', {}], 'time up with nobody right: no gains, and no nought for the drawer');
+  });
+  t('after the turn: the next online drawer, a new pass, then results', () => {
+    const end = (over) => H.normalizeRoom(drawRoom(Object.assign({ step: 'turnEnd', stepMs: 6000, word: WORD, gained: {} }, over)));
+    eq(DRAW.step(end({}), dctx([], T0 + 5999)), null, 'six seconds first');
+    const a = DRAW.step(end({}), dctx([], T0 + 6000));
+    eq([a.game.drawer, a.game.ti, a.game.pass, a.game.round, a.feed], [U.b, 1, 1, 2, []], 'Ben next, the feed cleared');
+    const b = DRAW.step(end({ ti: 1, drawer: U.b }), dctx([], T0 + 6000));
+    eq([b.game.drawer, b.game.ti], [U.d, 3], 'Cat is away, so Dee');
+    const c = DRAW.step(end({ ti: 3, drawer: U.d, rounds: 2 }), dctx([], T0 + 6000));
+    eq([c.game.drawer, c.game.pass], [U.host, 2], 'round two starts again from the top');
+    const d = DRAW.step(end({ ti: 3, drawer: U.d }), dctx([], T0 + 6000));
+    eq([d.phase, d.game.step], ['results', 'results'], 'after the last round, results');
+    const late = { uid: 'EEEEeeeeeeeeeeeeeeeeeeeeeeee', nick: 'Eve', joinedAt: T0, seenAt: T0, ansR: 0, hue: 4 };
+    const e = DRAW.step(end({ ti: 3, drawer: U.d, order: [U.host, U.b, U.c, U.d], rounds: 1 }), dctx([], T0 + 6000, drawPlayers().concat([late])));
+    eq([e.game.drawer, e.game.order.length], [late.uid, 5], 'somebody who arrived mid-game draws at the end of the round');
+  });
+  t('a whole game, driven by step() with fake answers, ends with the right scoreboard', () => {
+    let r = H.normalizeRoom(fixtureRoom({ phase: 'play', kind: 'draw', scores: {}, feed: [],
+      game: Object.assign(DRAW.setup({ rounds: '1', dsecs: '75' }, drawPlayers(), {}, T0).game, { stepAt: T0, order: [U.host, U.b, U.d], drawer: U.host }) }));
+    let t = T0, steps = 0;
+    const apply = (patch) => {
+      const raw = JSON.parse(JSON.stringify(Object.assign({}, r, patch)));
+      if (raw.game.stepAt === 'now') raw.game.stepAt = t;
+      r = H.normalizeRoom(raw);
+    };
+    while (r.phase === 'play' && steps < 30) {
+      const g = r.game;
+      let ans = [];
+      if (g.step === 'pick') { t += 2000; ans = [{ uid: g.drawer, r: g.round, v: H.encodePick(H.choicesFor(g, g.drawer)[1], g, []), at: t }]; }
+      else if (g.step === 'draw') {
+        /* Everyone who is not drawing gets it at the halfway mark: 150 each. */
+        const word = H.choicesFor(g, g.drawer)[1];
+        t = g.stepAt + g.stepMs / 2;
+        ans = [U.host, U.b, U.d].filter((u) => u !== g.drawer).map((u) => ({ uid: u, r: g.round, v: 'G|1|' + word, at: t }));
+      } else t = g.stepAt + g.stepMs;
+      const patch = DRAW.step(r, dctx(ans, t));
+      ok(patch, 'step ' + steps + ' (' + g.step + ') produced a patch');
+      apply(patch);
+      steps++;
+    }
+    eq(r.phase, 'results', 'the game ended');
+    eq(steps, 9, 'three turns of pick, draw, turnEnd');
+    eq([U.host, U.b, U.d].map((u) => r.scores[u]), [400, 400, 400], 'each drew once (2 × 50) and guessed twice (2 × 150)');
+    eq(Object.keys(r.scores).length, 3, 'and nobody else scored');
+    eq(r.game.used.length, 3, 'three words used');
+  });
+  t('the drawing game map is normalized field by field', () => {
+    const r = H.normalizeRoom(drawRoom({ order: [U.b, 'bad uid', U.b, U.c], drawer: '<x>', seed: 'NOTHEX', wordHash: 'abc',
+      shape: '3-5-<b>', hints: ['1a', 'Z9', 5], seen: { [U.b]: '2', 'x y': 1 }, got: { [U.b]: 9999 }, word: 'Not<A>Word',
+      used: [99999, -1, 2], rounds: 9, secs: 1, ti: 99 }));
+    const g = r.game;
+    eq(g.order, [U.b, U.c], 'bad and repeated uids dropped');
+    eq([g.drawer, g.seed, g.wordHash, g.shape, g.word], ['', '', '', '', ''], 'every shaped string checked, never repaired');
+    eq(g.hints, ['1a'], 'hints too');
+    eq([g.seen, g.got], [{ [U.b]: 2 }, { [U.b]: 1000 }], 'maps keyed by uid and clamped');
+    eq(g.used, [H.DRAW_WORDS.length - 1, 0, 2], 'used indexes clamped to the list');
+    eq([g.rounds, g.secs, g.ti], [3, 30, H.PLAYERS_MAX - 1], 'numbers clamped');
+    eq(Object.keys(g).sort(), ['drawer', 'gained', 'got', 'hints', 'order', 'pass', 'round', 'rounds', 'secs', 'seed', 'seen', 'shape',
+      'step', 'stepAt', 'stepMs', 'ti', 'turns', 'used', 'word', 'wordHash'], 'and nothing else');
+    ok(!('words' in g) && !('cards' in g), 'never the two keys the rules size-check for the later games');
+  });
+
+  group('drawing: what a player sees');
+  const inDraw = (asUid, game, over) => {
+    H.__setOffset(T0 + 2000 - Date.now());
+    H.__setMe(asUid);
+    H.__plantPlayers(drawPlayers());
+    H.__plantRoom(Object.assign(drawing(game), over || {}));
+  };
+  t('the HOST, guessing, never sees the word — only the blanks', () => {
+    const D = W.document;
+    try {
+      inDraw(U.b, { drawer: U.d });   /* Dee draws; Ben is... */
+      H.__setMe(U.host);              /* ...and Ada, the host, is guessing */
+      H.__plantRoom(drawing({ drawer: U.d, wordHash: H.hashWord(SEED, 1, WORD) }));
+      const txt = D.getElementById('roomView').textContent.toLowerCase();
+      ok(txt.indexOf(WORD) === -1, 'the word is nowhere on the host’s screen', WORD);
+      ok(D.querySelector('.blanks') && /_/.test(D.querySelector('.blanks').textContent), 'the blanks are');
+      ok(D.getElementById('guessBox'), 'and the host has a guess box like everyone else');
+      ok(!D.querySelector('.tools'), 'and no drawing tools');
+    } finally { home(); }
+  });
+  t('the drawer is offered three words to pick, and sees the word while drawing — even after a reload', () => {
+    const D = W.document;
+    try {
+      inDraw(U.host, { step: 'pick', stepMs: 10000, wordHash: '', shape: '' });
+      const words = [...D.querySelectorAll('[data-word]')].map((b) => b.getAttribute('data-word'));
+      eq(words, H.choicesFor(G1, U.host), 'the three choices');
+      H.__setDraw({ round: 0, word: '' });   /* a reload: this browser has forgotten what it picked */
+      H.__plantRoom(drawing());
+      ok(D.querySelector('[data-part="word"]').textContent.indexOf(WORD) !== -1, 'the word, recovered from the hash and the choices');
+      ok(D.querySelector('.tools') && D.querySelectorAll('.tools .swatch').length === H.DRAW_COLOURS.length, 'and the tools');
+      ok(D.getElementById('drawCanvas').classList.contains('live'), 'on a live canvas');
+      ok(!D.getElementById('guessBox'), 'and no guess box for the drawer');
+    } finally { H.__setDraw({ round: 0, word: '' }); home(); }
+  });
+  t('another player sees “got it” in the feed, never the word; whoever got it loses the box', () => {
+    const D = W.document;
+    try {
+      inDraw(U.d, { got: { [U.b]: 180 } });
+      H.__plantRoom(Object.assign(drawing({ got: { [U.b]: 180 } }), { feed: [{ t: 'got', uid: U.b, text: '' }, { t: 'guess', uid: U.d, text: WRONG }] }));
+      const feed = D.querySelector('.feed').textContent;
+      ok(/Ben got it/.test(feed), 'Ben got it', feed);
+      ok(feed.indexOf(WRONG) !== -1, 'a wrong guess is shown');
+      ok(D.getElementById('guessBox'), 'Dee can still guess');
+      H.__setMe(U.b);
+      ok(!D.getElementById('guessBox') && /you got it/.test(D.getElementById('roomView').textContent), 'Ben cannot, and is told why');
+    } finally { home(); }
+  });
+  t('a snapshot mid-turn keeps the canvas element and the half-typed guess', () => {
+    const D = W.document;
+    try {
+      inDraw(U.b);
+      const canvas = D.getElementById('drawCanvas');
+      const stage = D.getElementById('drawStage');
+      const box = D.getElementById('guessBox');
+      box.value = 'half a gue';
+      box.focus();
+      H.__plantRoom(Object.assign(drawing(), { rev: 9, feed: [{ t: 'guess', uid: U.d, text: 'apple' }] }));
+      ok(D.getElementById('drawCanvas') === canvas, 'the same canvas, never rebuilt');
+      ok(D.getElementById('drawStage') === stage, 'the card refreshed in place — moving the canvas mid-stroke would drop the pointer');
+      eq(D.getElementById('guessBox').value, 'half a gue', 'the guess box kept what was typed');
+      ok(D.activeElement === D.getElementById('guessBox'), 'and the focus');
+      ok(/apple/.test(D.querySelector('.feed').textContent), 'while the feed moved on');
+      H.__plantRoom(drawing({ step: 'turnEnd', stepMs: 6000, word: WORD, gained: { [U.b]: 150, [U.host]: 50 } }));
+      ok(D.getElementById('drawCanvas') === canvas, 'the same canvas into the next view too');
+      ok(D.getElementById('roomView').textContent.indexOf('The word was ' + WORD) !== -1, 'turn end says the word');
+      ok(/\+150 Ben/.test(D.querySelector('.gains').textContent), 'and what it paid');
+    } finally { home(); }
+  });
+  t('a late joiner gets the whole drawing in one read; another turn’s strokes are ignored', () => {
+    try {
+      inDraw(U.d);
+      const segs = [H.encodeSeg(1, 0, 2, [[0, 0], [500, 500]]), H.encodeSeg(2, 1, 3, [[10, 10]]), 'junk'];
+      W.brApp.onStrokes({ seq: 1, segs: segs });
+      eq(H.__pad().segs.map((s) => s.n), [1, 2], 'the two good segments');
+      W.brApp.onStrokes({ seq: 7, segs: segs });
+      eq(H.__pad().segs.length, 2, 'a document from another turn changes nothing');
+      W.brApp.onStrokes({ seq: 1, segs: [] });
+      eq(H.__pad().segs.length, 0, 'and the drawer’s Clear empties it');
+    } finally { W.brApp.onStrokes(null); home(); }
+  });
+  t('the lobby offers Drawing & Guess with rounds, seconds and the read estimate', () => {
+    const D = W.document;
+    try {
+      inLobby(U.host);
+      const sel = D.getElementById('pickKind');
+      ok([...sel.options].some((o) => o.value === 'draw'), 'in the picker');
+      sel.value = 'draw';
+      sel.dispatchEvent(new W.Event('change', { bubbles: true }));
+      ok(D.getElementById('pickRounds') && D.getElementById('pickDSecs'), 'rounds and seconds');
+      ok(/cloud reads/.test(D.getElementById('drawCost').textContent), 'and what it costs');
+      eq(D.getElementById('startBtn').textContent, 'Start Drawing & Guess');
+    } finally { H.__pick().kind = 'trivia'; home(); }
+  });
+
+  group('drawing: the cloud and the demo');
+  t('only the drawer writes strokes, one merge per flush, never past the rules’ 400', () => {
+    const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+    ok(/segs: F\.arrayUnion\(\.\.\.list\)/.test(mod) && /\{ merge: true \}/.test(mod), 'arrayUnion, merged');
+    ok(/strokes: strokes, clearStrokes: clearStrokes/.test(mod), 'on brCloud');
+    ok(/syncStrokesListener\(code, r\);/.test(mod), 'the listener follows the room');
+    ok(/  onStrokes: /.test(stripComments(APP_SRC)), 'and brApp takes the snapshot');
+    const rules = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(/room\(\)\.game\.get\('drawer', ''\) == me\(\)/.test(rules), 'the rules name the drawer as the only writer');
+    eq(+(rules.match(/segs\.size\(\) <= (\d+)/) || [])[1], H.SEGS_MAX, 'and the cap is the same number on both sides');
+  });
+  t('the demo’s doodles are real words, real segments, and its players have whole names', () => {
+    H.DEMO_DOODLES.forEach((w) => {
+      ok(H.DRAW_WORDS.indexOf(w) !== -1, w + ' is in the list');
+      const segs = H.doodleSegs(w);
+      ok(segs.length && segs.every((s) => H.parseSeg(s)), w + ' encodes to segments a watcher accepts');
+    });
+    ok(H.DEMO_PLAYERS.every((p) => p.nick.length <= H.NICK_MAX), 'no demo nickname is cut short by the cap');
+    eq(H.initials('Priya (online)'), 'PR', 'and an avatar is letters, not a bracket');
+  });
+  t('the demo room keeps its own player when the cloud’s sign-in lands late', () => {
+    try {
+      H.__demo(true);
+      H.__setMe(H.DEMO_ME);
+      W.brApp.onAuth('LATEaaaaaaaaaaaaaaaaaaaaaaaa');
+      eq(H.__me(), H.DEMO_ME, 'still the demo’s host');
+    } finally { H.__demo(false); home(); }
   });
 
 }

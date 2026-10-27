@@ -86,13 +86,67 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
+**M3 — drawing & guess (2026-10-27, branch `m3-drawing`).** `GAMES.draw` — a PURE `step()`
+through `pick` (10 s) → `draw` (60/75/90 s, hints at 40% and 67%) → `turnEnd` (6 s) → the
+next ONLINE drawer, `advance()` appending late joiners — a synchronous `sha256Hex`, the
+563-word `DRAW_WORDS`, `choicesFor` / `resolveWord`, the pick (`P|hash|shape|hints`) and
+guess (`G|n|text`) answer encodings, the stroke codec (`n:c:w:x,y …`, `SEG_RE`), the
+`makeCoalescer` (400 ms on an injected clock), `normalizeStrokes`, the canvas (`pad`), the
+module's `live/strokes` listener and two writes (`strokes` = merge + `arrayUnion`,
+`clearStrokes` = set), the lobby's read estimate (`drawCost`), and the demo's doodlers.
+**SCHEMA 2**: a room written by this build halts an M2 page rather than letting it host a
+game it cannot run. **No rules change** — `live/strokes` was in the rules from M0, and the
+pick and guesses fit the answer document's 120-character string. Observed against the real
+cloud with three Playwright profiles: first stroke on the watcher 0.3 s after pen-down, the
+guessing host never shown the word, a mid-turn joiner given the whole drawing in one read,
+a right guess shown to a third player only as "got it", zero rule refusals. `EXPECTED` 163.
+
+**The hash hides the word from the honest screen, not from a cheat.** The host's browser
+has the seed, the round, the drawer's uid and the word list — `resolveWord` is the same
+brute force a curious host could run in the console. That is the plan's stated bar for a
+party game; don't "fix" it with a server, and don't let anything render the word before
+`turnEnd`.
+
+**Things a tidy-up would break (M3):**
+- **The canvas is ONE element for the visit, MOVED into each view's `#drawSlot`**, and the
+  drawing card REFRESHES IN PLACE (`GAMES.draw.refresh`, keyed on step/round/role/got)
+  between steps. Rebuilding either mid-stroke drops the pointer and ends the line; a test
+  pins that `#drawStage` survives a snapshot. `keepTyping()` is the second layer, for the
+  guess box across a full redraw — not a reason to drop the first.
+- **`step()` must stay synchronous**, which is why SHA-256 is hand-written rather than
+  `crypto.subtle` (async). The suite checks it against known vectors and against
+  `crypto.subtle` on a long UTF-8 string.
+- **Every run of whole words in a guess is hashed** (`guessMatches`), not only the whole
+  guess. Otherwise "is it a cat?" is WRONG — and a wrong guess goes into the feed for
+  everyone, word and all.
+- **A guess carries a counter (`G|n|`) and the room keeps `game.seen`**: the answer document
+  is overwritten guess by guess, and without the counter `step()` would re-read the same
+  guess every tick. A reloaded guesser resumes from `seen[me] + 1`.
+- **`seq` on the strokes document is the ROUND it belongs to**, and a watcher ignores a
+  document whose `seq` is not this turn's — that is what stops last turn's drawing showing
+  under a new word if a clear is slow. The drawer clears BEFORE sending its pick (one
+  browser's writes land in order).
+- **The segment counter `n` never restarts within a turn**, Clear included
+  (`co.reset(co.next())`): `arrayUnion` silently drops a string already in the list, so two
+  identical strokes must be two different strings.
+- **Never name a draw-game field `words` or `cards`** — `validRoom` size-checks those two for
+  the later games, and a drawing room would be refused. A test pins it.
+- **`brApp.onAuth` does nothing while the demo is on**, and `leaveRoom` picks the cloud uid
+  up afterwards: the anonymous sign-in can finish after the demo room opens, and used to
+  take the demo host's seat away (found in M3; it was there since M1).
+- **The host's answers listener is dropped BEFORE a Leave hands the seat on** — the rules
+  refuse it the moment the handoff lands, and it said so in the console.
+- **Demo nicknames are ≤ 20 characters** — `NICK_MAX` slices, and two of them used to lose
+  their closing bracket. The demo's pace is read off "quick" / "slow" in the nickname.
+
 **M2 — trivia (2026-10-27).** `GAMES.trivia` — `normalize`, `options`, `setup`, a PURE
 `step()`, `encode`, `view`, `tick`, `onClick`, `results`, `demoAnswer` — four embedded packs
 of forty (`PACK_LIST` → `PACKS`), `parsePack` and the Custom Packs window, the countdown
 from server time plus the measured offset. The suite drives a whole game through `step()`
 with fake answers and a fake clock, pins the packs (forty each, four distinct answers, no
 repeats, unchanged by the boundary) and the parser's line-numbered report. The demo's
-invented players answer on their own, each at a pace named in their nickname. `EXPECTED`
+invented players answer on their own, each at a pace named in their nickname (since M3,
+"quick" and "slow"). `EXPECTED`
 131.
 
 **The cloud went on the same afternoon (project `breakroom-3722e`, Spark plan).** Observed
@@ -168,8 +222,8 @@ Firebase console steps are a numbered checklist in the README and need Charles.
 - A new field on a room, a player or an answer goes into the matching `normalize*`
   allowlist, into `firestore.rules`, AND bumps `SCHEMA` in the same commit, or the boundary
   strips it and the rules refuse it.
-- Nicknames (20), questions (160) and answers (60 × 4) are the only free text, capped in
-  code; guesses and answers live only for the round; **there is no notes field anywhere, and
+- Nicknames (20), questions (160), answers (60 × 4) and drawing guesses (40) are the only
+  free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
   none is to be added.**
 - Escape everything rendered with `esc()`. Every nickname, question and answer on screen
   was typed in another browser: it is untrusted input on the shared origin.

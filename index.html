@@ -913,6 +913,41 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .scores tr.lead th, .scores tr.lead td { font-weight: var(--fw-semibold); }
   .gain { color: var(--ok); font-variant-numeric: tabular-nums; }
 
+  /* ── The drawing game ──────────────────────────────────────────────────────
+     The canvas is TRANSPARENT over --surface-alt, so the eraser can cut
+     through to the theme and a theme change needs no repaint of the paper.
+     touch-action: none on it alone, so a finger draws there and scrolls
+     everywhere else. The chosen tool takes the primary fill, as a chosen
+     answer does; a chosen swatch takes an inset ring (never a shadow). */
+  .draw-slot { margin: var(--sp-5) 0; }
+  /* Never taller than about 60% of the window, so the guess box and the feed
+     stay in sight on a laptop beside a call. */
+  .draw-canvas { display: block; width: min(100%, calc(60vh * 4 / 3)); margin: 0 auto; aspect-ratio: 4 / 3; background: var(--surface-alt);
+                 border: 1px solid var(--border); border-radius: var(--radius-sm); touch-action: none; }
+  .draw-canvas.live { cursor: crosshair; border-color: var(--border-strong); }
+  .choices { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
+  .choices button { flex: 1 1 9rem; min-height: 56px; font-size: var(--fs-lg); }
+  .word-line { margin: 0; overflow-wrap: anywhere; }
+  .blanks { font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: var(--fw-semibold);
+            letter-spacing: .3em; white-space: pre-wrap; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-5); }
+  .tools .tool-gap { width: var(--sp-4); }
+  .tools .swatch { width: 36px; height: 36px; min-width: 0; padding: 0; border-radius: 50%;
+                   background: var(--sw); border: 2px solid var(--border-strong); }
+  .tools .swatch[aria-pressed="true"] { border-color: var(--text-primary); box-shadow: inset 0 0 0 3px var(--surface); }
+  .tools .tool[aria-pressed="true"] { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
+  .guessrow { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-5); }
+  .guessrow input { flex: 1 1 auto; min-width: 0; }
+  .got-line { margin: 0 0 var(--sp-5); }
+  .gains { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-6); }
+  .feed { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; font-size: var(--fs-sm); }
+  .feed li { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .feed li:last-child { border-bottom: 0; }
+  .feed li.got { color: var(--ok); }
+  .feed li.info { color: var(--text-secondary); }
+  .cost-line { grid-column: 1 / -1; margin: 0; }
+  .cost-line.over { color: var(--warn); }
+
   /* A textarea for a pasted pack, in the mono face so the pipes line up. */
   #packText { font-family: var(--font-mono); font-size: var(--fs-xs); min-height: 12em; resize: vertical; }
 </style>
@@ -1188,7 +1223,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 1;
+const SCHEMA = 2;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -2007,17 +2042,801 @@ GAMES.trivia = {
     return '<p class="lede">' + g.order.length + ' questions from <strong>' + esc((packFor(r) || { name: 'the pack' }).name) + '</strong>. '
       + 'Points carry on to the next game — the scoreboard below is the night so far.</p>';
   },
-  /* The demo's invented players. "Answers fast" is right and quick; "answers
-     slowly" is right half the time; the rest are right most of the time. */
+  /* The demo's invented players. "Quick" is right and fast; "slow" is right
+     half the time; the rest are right most of the time. */
   demoAnswer(sr, p) {
     const q = questionAt({ game: sr.game, pack: sr.pack }, sr.game.qi);
     if (!q) return 0;
-    const chance = /fast/.test(p.nick) ? 1 : /slowly/.test(p.nick) ? 0.5 : 0.7;
+    const chance = /quick/.test(p.nick) ? 1 : /slow/.test(p.nick) ? 0.5 : 0.7;
     if (Math.random() < chance) return q.c;
     return (q.c + 1 + Math.floor(Math.random() * 3)) % 4;
   },
 };
 let myPick = { round: 0, v: null };
+
+/* ═══════════════════════════ Drawing & guess ═════════════════════════════
+   One player draws a word, everyone else types guesses, and the host's
+   browser — which is ALSO a guesser — decides who got it without ever being
+   shown the word. Steps: `pick` (the drawer chooses one of three, ten
+   seconds) → `draw` (seventy-five, with a letter given away at 40% and 67%
+   of the time) → `turnEnd` (six seconds: the word and the points) → the next
+   drawer's `pick`. A round is everyone drawing once; the host picks 1–3.
+
+   HOW THE HOST GUESSES WITHOUT SEEING THE WORD. The drawer's browser sends
+   SHA-256(seed : round : word) — not the word — in its answer document, and
+   the host compares every guess hashed the same way. The word reaches the
+   room document only at `turnEnd`, when the host's step finds which of the
+   drawer's three choices (or, failing that, which word in the list) has that
+   hash. A determined host could do the same from the console at any time:
+   this hides the word from the honest screen, not from a cheat, which is the
+   right bar for a party game. The hash is a pure synchronous function below
+   (not crypto.subtle, which is async) because step() must stay pure and
+   synchronous for the suite to drive whole games with it.
+
+   STROKES never touch the room document. The drawer's browser buffers
+   pointer points on a 0–1000 grid and flushes every 400 ms into ONE
+   document, `live/strokes`, as one string per segment
+   "n:colour:width:x,y x,y …" via arrayUnion — `n` counts up through the turn,
+   which is what defeats arrayUnion's de-duplication of two identical
+   segments. One document, so a late joiner gets the whole drawing in one
+   read. Every watcher parses every string with a strict regex and drops
+   anything that fails; nothing from that document is ever put in the page as
+   markup — it only becomes canvas paths. */
+/* One template string, cut into words on commas and line ends — not a chain of
+   '+'-joined pieces, which CodeQL reads as words missing a space between them. */
+const DRAW_WORDS = `
+  accordion,acorn,airplane,alarm clock,alien,ambulance,anchor,angel,ant,ant hill,apple,apron,archery
+  arrow,artist,astronaut,axe,backpack,bacon,baker,balcony,balloon,banana,banjo,barn,baseball
+  basketball,bat,bathtub,battery,beach,bear,beard,beaver,bed,bee,beehive,bell,belt,bench,bicycle
+  bird cage,bird nest,birthday,birthday cake,blanket,blender,boat,bone,book,bookshelf,boot,bottle
+  bow tie,bowl,bowling,boxing,brain,bread,bridge,broccoli,broom,broomstick,bucket,burger,bus,butterfly
+  button,cactus,cake,calculator,calendar,camel,camera,campfire,camping,candle,candy,cannon,canoe,car
+  carousel,carpet,carrot,castle,castle wall,cat,caterpillar,cave,cereal,chair,cheese,cheetah,chef
+  cherry,chess,chicken,chimney,chocolate,chopsticks,church,clock,cloud,clown,coat,cobweb,coffee,coin
+  collar,comb,comet,compass,computer,cookie,corn,cow,cowboy,crab,crayon,credit card,crocodile
+  croissant,crown,crystal ball,cup,cupcake,curtain,deer,dentist,desert,devil,dice,dinosaur,doctor,dog
+  dog house,dolphin,domino,donut,door,doorbell,dragon,dragon egg,dragonfly,drawer,dress,drill,drum
+  duck,dumbbell,eagle,ear,earring,easel,egg,elephant,elevator,envelope,eraser,eye,farmer,fence
+  ferris wheel,finger,fire,fire truck,firefighter,fireworks,fish,fish bowl,fishing,flag,flamingo
+  flashlight,flower,flute,food truck,foot,football,forest,fork,fountain,fox,french fries,fridge
+  frisbee,frog,garage,garden,gate,ghost,gift,giraffe,glasses,globe,glove,glue,goal,goat,golf,gorilla
+  grapes,grass,greenhouse,guitar,hair,hair dryer,hairbrush,hammer,hamster,hamster wheel,hand,harp,hat
+  headphones,heart,hedgehog,helicopter,helmet,hiking,hill,hippo,hockey,honey,honeycomb,horse,hospital
+  hot air balloon,hot dog,hourglass,house,hurricane,ice cream,ice cream truck,icicle,igloo,island
+  jacket,jam,jar,jellyfish,juice,jump rope,jungle,kangaroo,karate,kennel,kettle,key,keyboard,king,kite
+  knife,knight,koala,ladder,ladybug,lake,lamp,laptop,lawn mower,leaf,leash,lemon,lemonade,leopard
+  library,light bulb,lighthouse,lightning,lion,lipstick,lizard,lobster,lock,lollipop,magic wand,magnet
+  mailbox,map,maracas,marshmallow,mask,mat,medal,mermaid,microphone,microwave,milk,mirror,mitten,money
+  monkey,monster,moon,moose,mop,mosquito,motorcycle,mountain,mouse,mouth,movie theater,muffin,mug
+  mummy,muscle,museum,mushroom,nail,nail polish,necklace,net,ninja,noodles,north pole,nose,notebook
+  ocean,octopus,onion,orange,origami,otter,oven,owl,paint roller,paintbrush,pajamas,palm tree,pan
+  pancake,panda,pants,paper,paper airplane,paperclip,parachute,parrot,party,peacock,pear,peas,pen
+  pencil,penguin,pepper,perfume,phone,piano,pie,pig,pigeon,piggy bank,pillow,pine tree,pineapple
+  pinecone,pirate,pirate ship,pizza,planet,plate,pocket,polar bear,police car,police officer,popcorn
+  popsicle,pot,potato,potion,pretzel,princess,printer,puddle,pumpkin,purse,puzzle,pyramid,queen,rabbit
+  raccoon,radio,rain,rainbow,rake,rat,razor,remote control,rhino,ring,river,robot,rock,rocket
+  roller coaster,roof,rose,ruler,sailboat,salad,sand castle,sandal,sandbox,sandwich,satellite,sausage
+  saw,saxophone,scarecrow,scarf,school,scissors,scooter,screw,screwdriver,seal,seesaw,shark,sheep
+  shell,shield,ship,shipwreck,shirt,shoe,shopping cart,shovel,shower,sink,skateboard,skeleton,skiing
+  skirt,skull,skunk,skyscraper,sled,sleeping bag,slide,smile,smoke,snail,snake,snow,snowboard
+  snowflake,snowman,soap,soccer ball,sock,sofa,soup,spaceship,speaker,spellbook,spider,spider web
+  spoon,squirrel,stairs,stamp,stapler,star,starfish,statue,stop sign,strawberry,submarine,sun,sundial
+  sunflower,sunglasses,surfing,sushi,swan,sweater,swimming,swimsuit,swing,swing set,sword,table,tablet
+  taco,tape,taxi,tea,teacher,teapot,tear,telescope,television,tennis,tent,thumb,thunderstorm,ticket
+  tiger,tire,toast,toaster,toilet,tomato,toolbox,tooth,toothbrush,toothpaste,tornado,towel,tower
+  tractor,traffic light,train,tram,trampoline,treadmill,treasure chest,treasure map,tree,trophy,truck
+  trumpet,tulip,turtle,umbrella,unicorn,vacuum,vampire,van,vase,violin,volcano,waffle,wall,wallet
+  watch,waterfall,watering can,watermelon,wave,wedding,wedding cake,whale,wheel,wheelbarrow,whistle
+  wig,windmill,window,witch,wizard,wolf,worm,wreath,wrench,xylophone,yo yo,yoga,zebra,zipper,zombie
+`.split(/[,\n]/).map((w) => w.trim()).filter(Boolean);
+const PICK_MS = 10000;
+const PICK_GRACE_MS = 5000;      /* the drawer's own browser auto-picks at 10 s; this covers one that has gone */
+const TURN_END_MS = 6000;
+const HINT_AT = [0.4, 0.667];    /* of the drawing time: 30 s and 50 s of 75 */
+const DRAWER_PTS = 50;           /* per player who gets it */
+const GUESS_MAX = FEED_TEXT_MAX; /* a guess lands in the feed, so it shares the feed's cap */
+const GUESS_GAP_MS = 1000;       /* one guess a second: a second one sooner would overwrite the first unread */
+const SEGS_MAX = 400;            /* the rules' segs.size() cap */
+const SEG_PTS_MAX = 60;
+const SEG_MIN_STEP = 4;          /* grid units: closer points add bytes and no shape */
+const GRID = 1000;
+const FLUSH_MS = 400;
+const DRAW_COLOURS = [['--text', 'Ink'], ['--series-1', 'Blue'], ['--series-2', 'Gold'],
+                      ['--series-3', 'Green'], ['--series-4', 'Pink'], ['--series-5', 'Rust']];
+const ERASER = 9;
+const DRAW_WIDTHS = [0.006, 0.014, 0.03, 0.06];   /* of the canvas width, for width 1–4 */
+const FREE_READS = 50000;        /* Spark's daily read allowance — the project stays on Spark */
+
+/* ── SHA-256, synchronous ────────────────────────────────────────────────── */
+const SHA_K = (() => {
+  const k = [], primes = [];
+  for (let n = 2; primes.length < 64; n++) if (primes.every((p) => n % p)) primes.push(n);
+  primes.forEach((p) => k.push((Math.cbrt(p) % 1) * 4294967296 >>> 0));
+  return k;
+})();
+function sha256Hex(str) {
+  const msg = Array.from(new TextEncoder().encode(String(str)));
+  const bits = msg.length * 8;
+  msg.push(0x80);
+  while (msg.length % 64 !== 56) msg.push(0);
+  for (let i = 7; i >= 0; i--) msg.push(i >= 4 ? 0 : (bits >>> (i * 8)) & 255);
+  const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const w = new Array(64);
+  const rot = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let o = 0; o < msg.length; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = (msg[o + 4 * i] << 24) | (msg[o + 4 * i + 1] << 16) | (msg[o + 4 * i + 2] << 8) | msg[o + 4 * i + 3];
+    for (let i = 16; i < 64; i++) {
+      const s0 = rot(w[i - 15], 7) ^ rot(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rot(w[i - 2], 17) ^ rot(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (hh + (rot(e, 6) ^ rot(e, 11) ^ rot(e, 25)) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) | 0;
+      const t2 = ((rot(a, 2) ^ rot(a, 13) ^ rot(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+    h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+  }
+  return h.map((x) => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+
+/* ── Words, hashed ─────────────────────────────────────────────────────────
+   A guess is compared LETTERS ONLY, lower case, accents folded: "Ice-Cream!"
+   is "icecream". And every run of whole words inside a guess is tried too, so
+   "is it a cat?" scores for "cat" — otherwise a right answer wrapped in a
+   question would be WRONG, and a wrong guess goes into the feed for everyone,
+   word and all. */
+function wordKey(w) {
+  return String(w == null ? '' : w).toLowerCase().normalize('NFD').replace(/[^a-z]/g, '');
+}
+function hashWord(seed, round, word) { return sha256Hex(seed + ':' + round + ':' + wordKey(word)); }
+function guessMatches(seed, round, hash, text) {
+  const parts = String(text).toLowerCase().normalize('NFD').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 8);
+  for (let i = 0; i < parts.length; i++)
+    for (let j = i + 1; j <= parts.length && j - i <= 4; j++)
+      if (hashWord(seed, round, parts.slice(i, j).join('')) === hash) return true;
+  return false;
+}
+/* The three words a drawer is offered: drawn from a hash of the game's seed,
+   the round and the drawer, so the drawer's browser, a reloaded drawer and
+   the host all arrive at the same three without anybody sending them — and
+   skipping words already drawn tonight (`used`). Pure. */
+function choicesFor(g, drawer) {
+  const pool = [];
+  for (let i = 0; i < DRAW_WORDS.length; i++) if (g.used.indexOf(i) === -1) pool.push(i);
+  const hex = sha256Hex(g.seed + ':choices:' + g.round + ':' + drawer);
+  const out = [];
+  for (let k = 0; out.length < 3 && pool.length && k < 16; k++) {
+    const j = parseInt(hex.slice(k * 4, k * 4 + 4), 16) % pool.length;
+    out.push(DRAW_WORDS[pool[j]]);
+    pool.splice(j, 1);
+  }
+  return out;
+}
+/* The word whose hash the drawer sent — the three choices first, then the
+   whole list, because a drawer on a build with a different list (or the
+   demo's doodler) may have picked outside them. '' if nothing matches. */
+function resolveWord(g) {
+  const tryList = choicesFor(g, g.drawer).concat(DRAW_WORDS);
+  for (let i = 0; i < tryList.length; i++) if (hashWord(g.seed, g.round, tryList[i]) === g.wordHash) return tryList[i];
+  return '';
+}
+function wordShape(word) { return String(word).split(' ').map((s) => s.length).join('-'); }
+
+/* What the drawer's browser sends at pick time, and what a guesser's sends.
+   Both live in the drawer's / guesser's answer document (≤ 120 characters in
+   the rules), parsed back with strict regexes:
+     P|<hash>|<shape>|<hints>   shape "3-5" is the word lengths; hints "2e,6a"
+                                are the letters to give away, position + letter
+     G|<n>|<text>               n counts up per guesser per turn, so the host
+                                can tell a new guess from one it has read */
+const SHAPE_RE = /^\d{1,2}(?:-\d{1,2}){0,3}$/;
+const HINT_RE = /^\d{1,2}[a-z]$/;
+const PICK_V_RE = /^P\|([0-9a-f]{64})\|(\d{1,2}(?:-\d{1,2}){0,3})\|((?:\d{1,2}[a-z](?:,\d{1,2}[a-z]){0,1})?)$/;
+const GUESS_V_RE = /^G\|(\d{1,4})\|([^\u0000-\u001f]{1,40})$/;
+function hintPositions(word) {
+  const at = [];
+  String(word).split('').forEach((ch, i) => { if (ch !== ' ') at.push(i); });
+  const n = at.length >= 6 ? 2 : at.length >= 3 ? 1 : 0;
+  const pick = [];
+  const rnd = new Uint32Array(4);
+  crypto.getRandomValues(rnd);
+  for (let k = 0; pick.length < n && at.length; k++) pick.push(at.splice(rnd[k % 4] % at.length, 1)[0]);
+  return pick.sort((a, b) => a - b);
+}
+function encodePick(word, g, positions) {
+  const pos = positions || hintPositions(word);
+  return 'P|' + hashWord(g.seed, g.round, word) + '|' + wordShape(word) + '|' + pos.map((p) => p + word[p]).join(',');
+}
+function parsePick(v) {
+  const m = PICK_V_RE.exec(String(v));
+  return m ? { hash: m[1], shape: m[2], hints: m[3] ? m[3].split(',') : [] } : null;
+}
+function cleanGuess(text) {
+  return String(text == null ? '' : text).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, GUESS_MAX);
+}
+function encodeGuess(n, text) { const t = cleanGuess(text); return t ? 'G|' + n + '|' + t : null; }
+function parseGuess(v) {
+  const m = GUESS_V_RE.exec(String(v));
+  return m ? { n: Number(m[1]), text: m[2] } : null;
+}
+/* The blanks a guesser sees: one per letter, a gap between words, and the
+   given-away letters in place. Pure, from `shape` and `hints` only. */
+function blanksFor(shape, hints) {
+  if (!SHAPE_RE.test(String(shape))) return '';
+  const chars = [];
+  shape.split('-').forEach((n, i) => { if (i) chars.push(' '); for (let k = 0; k < Number(n); k++) chars.push('_'); });
+  (hints || []).forEach((h) => { const p = parseInt(h, 10); if (chars[p] === '_') chars[p] = h.slice(-1); });
+  return chars.join('');
+}
+
+function blanksSpoken(b) {
+  return 'The word: ' + b.split('').map((ch) => (ch === '_' ? 'blank' : ch === ' ' ? 'then' : ch)).join(' ');
+}
+
+/* ── The stroke codec ───────────────────────────────────────────────────────
+   "n:c:w:x,y x,y …" — n a counter, c a colour index (0–5, or 9 for the
+   eraser), w a width 1–4, then up to SEG_PTS_MAX points on the 0–1000 grid.
+   The regex is the whole of what a watcher accepts; a coordinate over 1000
+   fails the range check after it. */
+const SEG_RE = /^(\d{1,5}):([0-5]|9):([1-4]):(\d{1,4},\d{1,4}(?: \d{1,4},\d{1,4}){0,59})$/;
+function encodeSeg(n, c, w, pts) {
+  return n + ':' + c + ':' + w + ':' + pts.map((p) => p[0] + ',' + p[1]).join(' ');
+}
+function parseSeg(s) {
+  if (typeof s !== 'string' || s.length > 700) return null;
+  const m = SEG_RE.exec(s);
+  if (!m) return null;
+  const pts = m[4].split(' ').map((p) => p.split(',').map(Number));
+  if (pts.some((p) => p[0] > GRID || p[1] > GRID)) return null;
+  return { n: Number(m[1]), c: Number(m[2]), w: Number(m[3]), pts: pts };
+}
+/* The strokes document, normalized: the round it belongs to and the parsed
+   segments, de-duplicated by n and in n order. Anything else is dropped. */
+function normalizeStrokes(raw) {
+  if (!raw || typeof raw !== 'object') return { seq: 0, segs: [] };
+  const seen = new Set();
+  const segs = (Array.isArray(raw.segs) ? raw.segs : []).slice(0, SEGS_MAX).map(parseSeg)
+    .filter((s) => s && !seen.has(s.n) && seen.add(s.n)).sort((a, b) => a.n - b.n);
+  return { seq: int(raw.seq, 0, 1e6, 0), segs: segs };
+}
+
+/* ── The coalescer ─────────────────────────────────────────────────────────
+   Turns a stream of pointer points into segment strings, at most one send
+   per FLUSH_MS. A stroke still in progress at a flush is CUT there, and the
+   next segment starts at the cut point so the line has no gap. A tap with no
+   movement is a one-point segment — a dot. The clock is passed in, so the
+   suite runs it on a fake one. */
+function makeCoalescer(opts) {
+  let buf = null, out = [], last = -Infinity, n = opts.start || 1;
+  const close = (keepLast) => {
+    if (!buf) return;
+    if (buf.pts.length >= 2 || (buf.pts.length === 1 && !buf.carried)) out.push(encodeSeg(n++, buf.c, buf.w, buf.pts));
+    if (keepLast && buf.pts.length) { buf.pts = [buf.pts[buf.pts.length - 1]]; buf.carried = true; }
+    else buf.pts = [];
+  };
+  return {
+    down(x, y, c, w) { close(false); buf = { c: c, w: w, pts: [[x, y]], carried: false }; },
+    move(x, y) {
+      if (!buf) return;
+      const p = buf.pts[buf.pts.length - 1];
+      if (p && Math.abs(p[0] - x) + Math.abs(p[1] - y) < SEG_MIN_STEP) return;
+      buf.pts.push([x, y]);
+      if (buf.pts.length >= SEG_PTS_MAX) close(true);
+    },
+    up() { close(false); buf = null; },
+    tick() {
+      const t = opts.clock();
+      if (t - last < opts.ms) return false;
+      if (buf && buf.pts.length >= 2) close(true);
+      if (!out.length) return false;
+      last = t;
+      const send = out; out = [];
+      opts.send(send);
+      return true;
+    },
+    /* What has not been sent yet, as parsed segments, for the drawer's own redraw. */
+    pending() {
+      const list = out.map(parseSeg).filter(Boolean);
+      if (buf && buf.pts.length) list.push({ n: n, c: buf.c, w: buf.w, pts: buf.pts.slice() });
+      return list;
+    },
+    reset(start) { buf = null; out = []; n = start || 1; },
+    next() { return n; },
+  };
+}
+
+/* What a night of drawing costs in cloud reads, for the lobby's estimate
+   (the project stays on Spark: 50,000 reads a day). Per turn, every watcher
+   reads every stroke flush (≈110 in a 75 s turn of steady drawing) and every
+   room write (≈3 guesses a player, plus ≈8 steps and hints). Pure. */
+function drawCost(n, rounds, secs) {
+  const flushes = Math.round((secs || 75) * 1000 / FLUSH_MS * 0.6);
+  return Math.round(n * rounds * n * (flushes + 3 * n + 8));
+}
+
+function uidList(raw) {
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).map((u) => String(u == null ? '' : u))
+    .filter((u) => ID_RE.test(u) && !seen.has(u) && seen.add(u)).slice(0, PLAYERS_MAX);
+}
+function uidMap(raw, hi) {
+  const out = {};
+  if (raw && typeof raw === 'object')
+    Object.keys(raw).filter((k) => ID_RE.test(k)).slice(0, PLAYERS_MAX).forEach((k) => { out[k] = int(raw[k], 0, hi, 0); });
+  return out;
+}
+const WORD_RE = /^[a-z]+(?: [a-z]+){0,3}$/;
+
+GAMES.draw = {
+  id: 'draw', name: 'Drawing & Guess', min: 2, max: PLAYERS_MAX,
+  normalize(g, base) {
+    const drawer = String(g.drawer == null ? '' : g.drawer);
+    const word = String(g.word == null ? '' : g.word);
+    return Object.assign(base, {
+      order: uidList(g.order),
+      ti: int(g.ti, 0, PLAYERS_MAX - 1, 0),
+      pass: int(g.pass, 1, 4, 1),
+      rounds: int(g.rounds, 1, 3, 1),
+      secs: int(g.secs, 30, 120, 75),
+      turns: int(g.turns, 0, 1e4, 0),
+      drawer: ID_RE.test(drawer) ? drawer : '',
+      seed: /^[0-9a-f]{16}$/.test(String(g.seed)) ? String(g.seed) : '',
+      wordHash: /^[0-9a-f]{64}$/.test(String(g.wordHash)) ? String(g.wordHash) : '',
+      shape: SHAPE_RE.test(String(g.shape)) ? String(g.shape) : '',
+      hints: (Array.isArray(g.hints) ? g.hints : []).map(String).filter((h) => HINT_RE.test(h)).slice(0, HINT_AT.length),
+      seen: uidMap(g.seen, 9999),
+      got: uidMap(g.got, 1000),
+      gained: g.gained == null ? null : uidMap(g.gained, 1e5),
+      word: word.length <= 30 && WORD_RE.test(word) ? word : '',
+      used: (Array.isArray(g.used) ? g.used : []).slice(-96).map((n) => int(n, 0, DRAW_WORDS.length - 1, 0)),
+    });
+  },
+  /* The host's choices: rounds and seconds, and what that costs in reads —
+     the project is on the free plan, and drawing is the one game that can
+     run past it. */
+  options(pk) {
+    const n = Math.max(2, players.filter((p) => isOnline(p, now())).length);
+    const rounds = int(pk.rounds, 1, 3, 1), secs = int(pk.dsecs, 30, 120, 75);
+    const cost = drawCost(n, rounds, secs);
+    return '<div class="field"><label for="pickRounds">Rounds — everyone draws once a round</label><select id="pickRounds">'
+      + ['1', '2', '3'].map((v) => '<option value="' + v + '"' + (Number(v) === rounds ? ' selected' : '') + '>' + v + '</option>').join('')
+      + '</select></div>'
+      + '<div class="field"><label for="pickDSecs">Seconds per drawing</label><select id="pickDSecs">'
+      + ['60', '75', '90'].map((v) => '<option value="' + v + '"' + (Number(v) === secs ? ' selected' : '') + '>' + v + '</option>').join('')
+      + '</select></div>'
+      + '<p class="hint cost-line' + (cost > FREE_READS * 0.8 ? ' over' : '') + '" id="drawCost">About <strong>' + cost.toLocaleString('en-US')
+      + '</strong> cloud reads for ' + n + ' players — the free plan allows ' + FREE_READS.toLocaleString('en-US') + ' a day'
+      + (cost > FREE_READS * 0.8 ? '. That may run out tonight: try one round.' : '.') + '</p>';
+  },
+  setup(pk, list, loc, t) {
+    const at = t == null ? now() : t;
+    const online = list.filter((p) => isOnline(p, at));
+    if (online.length < 2) return { error: 'Drawing needs two people online — one to draw and one to guess.' };
+    const order = shuffled(online.length).map((i) => online[i].uid);
+    const seed = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('');
+    return {
+      game: { step: 'pick', stepAt: 'now', stepMs: PICK_MS, round: 1, turns: 1, order: order, ti: 0, pass: 1,
+              rounds: int(pk.rounds, 1, 3, 1), secs: int(pk.dsecs, 30, 120, 75), drawer: order[0], seed: seed,
+              wordHash: '', shape: '', hints: [], seen: {}, got: {}, gained: null, word: '', used: [] },
+      pack: null,
+    };
+  },
+  /* The next turn: the next ONLINE player in the order, a new pass when the
+     order runs out, results after the last pass. Anyone who arrived since
+     the game started joins the end of the order. */
+  advance(r, ctx, note) {
+    const g = r.game, t = ctx.now;
+    const order = g.order.concat(ctx.players.filter((p) => isOnline(p, t) && g.order.indexOf(p.uid) === -1).map((p) => p.uid)).slice(0, PLAYERS_MAX);
+    let ti = g.ti, pass = g.pass;
+    for (let k = 0; k <= order.length * 4; k++) {
+      ti++;
+      if (ti >= order.length) { ti = 0; pass++; }
+      if (pass > g.rounds) break;
+      const p = ctx.players.find((x) => x.uid === order[ti]);
+      if (p && isOnline(p, t)) {
+        return { feed: note || [], game: Object.assign({}, g, { step: 'pick', stepAt: 'now', stepMs: PICK_MS, round: g.round + 1,
+          turns: g.turns + 1, order: order, ti: ti, pass: pass, drawer: order[ti], wordHash: '', shape: '', hints: [],
+          seen: {}, got: {}, gained: null, word: '' }) };
+      }
+    }
+    return { phase: 'results', feed: note || [], game: Object.assign({}, g, { step: 'results', stepAt: 'now', stepMs: 0 }) };
+  },
+  /* THE engine. Returns the patch the host should push, or null. */
+  step(r, ctx) {
+    const g = r.game, t = ctx.now;
+    if (r.phase !== 'play' || r.kind !== 'draw' || !(g.stepAt > 0)) return null;
+    const timeUp = t >= g.stepAt + g.stepMs;
+    const fromDrawer = ctx.answers.find((a) => a.uid === g.drawer && a.r === g.round);
+    const picked = fromDrawer ? parsePick(fromDrawer.v) : null;
+    if (g.step === 'pick') {
+      if (picked) {
+        return { game: Object.assign({}, g, { step: 'draw', stepAt: 'now', stepMs: g.secs * 1000, wordHash: picked.hash,
+          shape: picked.shape, hints: [], seen: {}, got: {}, gained: null, word: '' }) };
+      }
+      if (t >= g.stepAt + g.stepMs + PICK_GRACE_MS)
+        return GAMES.draw.advance(r, ctx, [{ t: 'info', uid: g.drawer, text: 'didn’t pick a word' }]);
+      return null;
+    }
+    if (g.step === 'draw') {
+      let changed = false;
+      const seen = Object.assign({}, g.seen), got = Object.assign({}, g.got), scores = Object.assign({}, r.scores);
+      let feed = r.feed.slice();
+      ctx.answers.filter((a) => a.r === g.round && a.uid !== g.drawer).forEach((a) => {
+        const q = parseGuess(a.v);
+        if (!q || q.n <= (seen[a.uid] || 0)) return;
+        seen[a.uid] = q.n; changed = true;
+        if (a.uid in got) return;
+        if (guessMatches(g.seed, g.round, g.wordHash, q.text)) {
+          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - (a.at - g.stepAt)));
+          const pts = 100 + Math.floor(100 * remaining / g.stepMs);
+          got[a.uid] = pts;
+          scores[a.uid] = (scores[a.uid] || 0) + pts;
+          scores[g.drawer] = (scores[g.drawer] || 0) + DRAWER_PTS;
+          feed.push({ t: 'got', uid: a.uid, text: '' });
+        } else {
+          feed.push({ t: 'guess', uid: a.uid, text: q.text });
+        }
+      });
+      feed = feed.slice(-FEED_MAX);
+      const pool = picked && picked.hash === g.wordHash ? picked.hints : [];
+      const want = Math.min(pool.length, HINT_AT.filter((f) => t - g.stepAt >= f * g.stepMs).length);
+      const hints = want > g.hints.length ? pool.slice(0, want) : g.hints;
+      if (hints !== g.hints) changed = true;
+      const guessers = ctx.players.filter((p) => p.uid !== g.drawer && isOnline(p, t));
+      const allGot = guessers.length > 0 && guessers.every((p) => p.uid in got);
+      if (timeUp || allGot) {
+        const word = resolveWord(g);
+        const gained = Object.assign({}, got);
+        const n = Object.keys(got).length;
+        if (n) gained[g.drawer] = n * DRAWER_PTS;
+        const idx = DRAW_WORDS.indexOf(word);
+        return { scores: scores, feed: feed, game: Object.assign({}, g, { step: 'turnEnd', stepAt: 'now', stepMs: TURN_END_MS,
+          seen: seen, got: got, hints: hints, word: word, gained: gained, used: idx === -1 ? g.used : g.used.concat([idx]).slice(-96) }) };
+      }
+      if (!changed) return null;
+      return { scores: scores, feed: feed, game: Object.assign({}, g, { seen: seen, got: got, hints: hints }) };
+    }
+    if (g.step === 'turnEnd') return timeUp ? GAMES.draw.advance(r, ctx, []) : null;
+    return null;
+  },
+  encode(input) { return cleanGuess(input) || null; },
+
+  /* ── What a player sees ────────────────────────────────────────────────
+     Built in PARTS, because the canvas and the guess box must survive the
+     snapshots that arrive a dozen times a turn: the full view is drawn once
+     per step (keyed on step, round, role and "got it"), and every snapshot
+     in between replaces only the parts' contents. */
+  key(r, who) {
+    const g = r.game;
+    return [g.step, g.round, who === g.drawer ? 'd' : 'g', who in g.got ? 'got' : ''].join(':');
+  },
+  parts(r, who, list, t) {
+    const g = r.game;
+    const drawer = nickOf(g.drawer);
+    const amDrawer = who === g.drawer;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    const online = list.filter((p) => p.uid !== g.drawer && isOnline(p, t));
+    const gotN = online.filter((p) => p.uid in g.got).length;
+    const cd = '<span class="countdown' + (g.step === 'draw' && left < 10000 ? ' low' : '') + '" id="qLeft">' + fmtSecs(left) + '</span>';
+    const head = 'Turn ' + g.turns + '<span class="spacer"></span><span class="pill">Round ' + Math.min(g.pass, g.rounds) + ' of ' + g.rounds + '</span>';
+    let meter, word;
+    if (g.step === 'pick') {
+      meter = cd + ' seconds · ' + (amDrawer ? 'pick a word to draw' : '<strong>' + esc(drawer) + '</strong> is choosing a word');
+      word = amDrawer
+        ? '<div class="choices">' + choicesFor(g, who).map((w) => '<button type="button" data-word="' + esc(w) + '" aria-label="Draw ' + esc(w) + '">' + esc(w) + '</button>').join('') + '</div>'
+        : '<p class="word-line">Get ready to guess…</p>';
+    } else if (g.step === 'draw') {
+      meter = cd + ' seconds · ' + (amDrawer ? 'you are drawing' : '<strong>' + esc(drawer) + '</strong> is drawing')
+        + ' · ' + gotN + ' of ' + online.length + ' got it';
+      const mine = amDrawer ? myDrawWord(r) : '';
+      word = amDrawer
+        ? '<p class="word-line">Your word: <strong>' + esc(mine || '…') + '</strong> — no letters or numbers on the canvas</p>'
+        : '<p class="word-line"><span class="blanks" role="img" aria-label="' + esc(blanksSpoken(blanksFor(g.shape, g.hints))) + '">'
+          + esc(blanksFor(g.shape, g.hints)) + '</span><span class="hint"> · ' + g.shape.split('-').join(' + ') + ' letters</span></p>';
+    } else {
+      meter = 'Next turn in ' + cd;
+      const gained = g.gained || {};
+      const rows = Object.keys(gained).sort((a, b) => gained[b] - gained[a])
+        .map((u) => '<li><span class="gain">+' + gained[u] + '</span> ' + esc(nickOf(u)) + (u === g.drawer ? ' <span class="you">(drawing)</span>' : '') + (u === who ? ' <span class="you">(you)</span>' : '') + '</li>').join('');
+      word = '<p class="word-line">The word was <strong>' + esc(g.word || 'not found') + '</strong></p>'
+        + (rows ? '<ul class="gains">' + rows + '</ul>' : '<p class="hint">Nobody got it this time.</p>');
+    }
+    const feed = r.feed.length
+      ? r.feed.slice().reverse().map((f) => '<li class="' + f.t + '">'
+          + (f.t === 'got' ? '<strong>' + esc(nickOf(f.uid)) + '</strong> got it'
+            : f.t === 'info' ? '<strong>' + esc(nickOf(f.uid)) + '</strong> ' + esc(f.text)
+            : '<strong>' + esc(nickOf(f.uid)) + ':</strong> ' + esc(f.text)) + '</li>').join('')
+      : '<li class="info">Guesses show up here. A right one never does — it just says “got it”.</li>';
+    return { head: head, meter: meter, word: word, feed: feed };
+  },
+  view(r, who, list, ans, t) {
+    const g = r.game;
+    const p = GAMES.draw.parts(r, who, list, t);
+    const amDrawer = who === g.drawer;
+    let below = '';
+    if (g.step === 'draw' && amDrawer) {
+      below = '<div class="tools" role="group" aria-label="Drawing tools">'
+        + DRAW_COLOURS.map((c, i) => '<button type="button" class="swatch" data-colour="' + i + '" aria-label="' + c[1] + '" aria-pressed="' + (pad.tool.c === i) + '" style="--sw: var(' + c[0] + ')"></button>').join('')
+        + '<button type="button" class="tool" data-colour="' + ERASER + '" aria-pressed="' + (pad.tool.c === ERASER) + '">Eraser</button>'
+        + '<span class="tool-gap"></span>'
+        + ['S', 'M', 'L', 'XL'].map((s, i) => '<button type="button" class="tool" data-width="' + (i + 1) + '" aria-label="Line width ' + s + '" aria-pressed="' + (pad.tool.w === i + 1) + '">' + s + '</button>').join('')
+        + '<span class="tool-gap"></span><button type="button" class="tool" id="clearCanvasBtn">Clear</button></div>';
+    } else if (g.step === 'draw' && who in g.got) {
+      below = '<p class="got-line"><strong class="gain">+' + g.got[who] + '</strong> — you got it. Keep quiet on the call!</p>';
+    } else if (g.step === 'draw') {
+      below = '<div class="guessrow"><label class="sr-only" for="guessBox">Your guess</label>'
+        + '<input type="text" id="guessBox" maxlength="' + GUESS_MAX + '" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type a guess and press Enter">'
+        + '<button type="button" class="primary" id="guessBtn">Guess</button></div>';
+    }
+    return '<div class="card" id="drawStage" data-key="' + esc(GAMES.draw.key(r, who)) + '">'
+      + '<h2 data-part="head">' + p.head + '</h2>'
+      + '<div class="meter"><span data-part="meter">' + p.meter + '</span></div>'
+      + '<div data-part="word">' + p.word + '</div>'
+      + '<div class="draw-slot" id="drawSlot"></div>'
+      + below
+      + '<ul class="feed" data-part="feed">' + p.feed + '</ul></div>';
+  },
+  /* Every snapshot between step changes: refill the parts and keep the
+     canvas and the guess box. False means the shape changed — redraw. */
+  refresh(r, who, list, t) {
+    const stage = $('drawStage');
+    if (!stage || stage.getAttribute('data-key') !== GAMES.draw.key(r, who)) return false;
+    const p = GAMES.draw.parts(r, who, list, t);
+    ['head', 'meter', 'word', 'feed'].forEach((k) => {
+      const el = stage.querySelector('[data-part="' + k + '"]');
+      if (el && el.innerHTML !== p[k] && !(k === 'word' && r.game.step === 'pick')) el.innerHTML = p[k];
+    });
+    padSync(r);
+    return true;
+  },
+  mount(r, who) { padMount(r, who); },
+  tick(r, t) {
+    const el = $('qLeft');
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    if (el) { el.textContent = fmtSecs(left); el.classList.toggle('low', g.step === 'draw' && left < 10000); }
+    /* The drawer's own browser picks for them when the ten seconds run out,
+       so a turn is not lost to somebody reading the choices too slowly. */
+    if (g.step === 'pick' && g.drawer === me && g.stepAt > 0 && left <= 0 && myDraw.round !== g.round) {
+      const c = choicesFor(g, me);
+      if (c.length) pickWord(r, c[0]);
+    }
+  },
+  onClick(btn, r, who) {
+    const g = r.game;
+    const w = btn.getAttribute('data-word');
+    if (w !== null) { if (g.step === 'pick' && g.drawer === who && choicesFor(g, who).indexOf(w) !== -1) pickWord(r, w); return; }
+    if (btn.id === 'guessBtn') { sendGuess(r, who); return; }
+    if (btn.id === 'clearCanvasBtn') { padClear(); return; }
+    const c = btn.getAttribute('data-colour'), wd = btn.getAttribute('data-width');
+    if (c !== null || wd !== null) {
+      if (c !== null) pad.tool.c = Number(c) === ERASER ? ERASER : int(c, 0, DRAW_COLOURS.length - 1, 0);
+      if (wd !== null) pad.tool.w = int(wd, 1, 4, 2);
+      btn.closest('.tools').querySelectorAll('button[aria-pressed]').forEach((b) => {
+        const bc = b.getAttribute('data-colour'), bw = b.getAttribute('data-width');
+        b.setAttribute('aria-pressed', String(bc !== null ? Number(bc) === pad.tool.c : Number(bw) === pad.tool.w));
+      });
+    }
+  },
+  results(r) {
+    const g = r.game;
+    return '<p class="lede">' + g.turns + (g.turns === 1 ? ' drawing' : ' drawings') + ' over ' + g.rounds + (g.rounds === 1 ? ' round' : ' rounds')
+      + '. Points carry on to the next game — the scoreboard below is the night so far.</p>';
+  },
+};
+
+/* This browser's own part in a drawing turn, in memory only: the word it
+   picked (so the drawer's screen can say it), and how many guesses it has
+   sent this turn. A reload loses both and gets them back — the word from the
+   three choices and the room's wordHash, the count from `game.seen`. */
+let myDraw = { round: 0, word: '' };
+let myGuess = { round: 0, n: 0, at: 0 };
+function myDrawWord(r) {
+  const g = r.game;
+  if (myDraw.round === g.round && myDraw.word) return myDraw.word;
+  if (!g.wordHash) return '';
+  const w = choicesFor(g, g.drawer).find((x) => hashWord(g.seed, g.round, x) === g.wordHash) || '';
+  if (w) myDraw = { round: g.round, word: w };
+  return w;
+}
+function pickWord(r, word) {
+  const g = r.game;
+  if (myDraw.round === g.round) return;
+  myDraw = { round: g.round, word: word };
+  noteWrite();
+  /* The canvas is wiped BEFORE the pick lands: the writes from one browser
+     arrive in order, so no watcher ever sees last turn's drawing under this
+     turn's round number. */
+  const tr = transport();
+  pad.cleared = g.round;
+  tr.clearStrokes(g.round).catch((e) => console.warn('clear', e));
+  tr.answer(g.round, encodePick(word, g)).catch((e) => { console.warn('pick', e); myDraw = { round: 0, word: '' }; toast(describeCloudError(e)); });
+  render();
+}
+function sendGuess(r, who) {
+  const g = r.game;
+  const box = $('guessBox');
+  if (!box || g.step !== 'draw' || who === g.drawer || who in g.got) return;
+  const text = cleanGuess(box.value);
+  if (!text) return;
+  if (Date.now() - myGuess.at < GUESS_GAP_MS) { toast('One guess a second'); return; }
+  if (myGuess.round !== g.round) myGuess = { round: g.round, n: 0, at: 0 };
+  myGuess.n = Math.max(myGuess.n, g.seen[who] || 0) + 1;
+  myGuess.at = Date.now();
+  const v = encodeGuess(myGuess.n, text);
+  box.value = '';
+  noteWrite();
+  transport().answer(g.round, v).catch((e) => { console.warn('guess', e); toast(describeCloudError(e)); });
+}
+
+/* ═══════════════════════════════ The canvas ══════════════════════════════
+   The one imperatively drawn thing on the page, and ONE element for the
+   whole visit: created once, MOVED into each new view's slot, never rebuilt,
+   so a redraw of the room never ends a stroke half-way. Transparent, over
+   the card's own surface, so the eraser is `destination-out` and the theme
+   shows through; ink colours are read from the theme's tokens at draw time,
+   so a theme change is a redraw and nothing else. */
+const pad = { canvas: null, round: -1, segs: [], co: null, tool: { c: 0, w: 2 }, drawing: false, last: null,
+              cleared: 0, fullToast: false };
+let strokesDoc = { seq: 0, segs: [] };
+function padEnsure() {
+  if (pad.canvas) return pad.canvas;
+  const c = document.createElement('canvas');
+  c.className = 'draw-canvas';
+  c.id = 'drawCanvas';
+  c.setAttribute('role', 'img');
+  c.addEventListener('pointerdown', padDown);
+  c.addEventListener('pointermove', padMove);
+  c.addEventListener('pointerup', padUp);
+  c.addEventListener('pointercancel', padUp);
+  if ('ResizeObserver' in window) new ResizeObserver(() => padResize()).observe(c);
+  pad.canvas = c;
+  return c;
+}
+function padMount(r, who) {
+  const slot = $('drawSlot');
+  if (!slot) return;
+  const c = padEnsure();
+  if (c.parentNode !== slot) slot.appendChild(c);
+  padSync(r);
+  const g = r.game;
+  c.classList.toggle('live', g.step === 'draw' && g.drawer === who);
+  c.setAttribute('aria-label', g.step === 'draw' && g.drawer === who ? 'Your canvas — draw here'
+    : g.step === 'pick' ? 'The canvas, empty while a word is chosen' : 'The drawing by ' + nickOf(g.drawer));
+  padResize();
+}
+/* A new turn is a blank canvas and a fresh counter; the strokes document is
+   adopted when it is this turn's. */
+function padSync(r) {
+  if (!r || r.kind !== 'draw') return;
+  if (pad.round !== r.game.round) {
+    pad.round = r.game.round; pad.segs = []; pad.drawing = false; pad.last = null; pad.fullToast = false;
+    pad.co = null;
+    padRedraw();
+  }
+  padAdopt();
+}
+function padAdopt() {
+  if (!room || room.kind !== 'draw' || strokesDoc.seq !== pad.round) return;
+  const amDrawer = room.game.drawer === me;
+  /* The drawer's own screen is the truth for the drawer — except after a
+     reload, when the document holds more than this browser remembers. */
+  if (amDrawer && (pad.drawing || strokesDoc.segs.length <= pad.segs.length)) return;
+  pad.segs = strokesDoc.segs.slice();
+  if (amDrawer) pad.co = null;
+  padRedraw();
+}
+function canDraw() {
+  return !!(room && room.phase === 'play' && room.kind === 'draw' && room.game.step === 'draw'
+    && room.game.drawer === me && pad.round === room.game.round);
+}
+function padResize() {
+  const c = pad.canvas;
+  if (!c || !c.isConnected) return;
+  const r = c.getBoundingClientRect();
+  if (!r.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  padRedraw();
+}
+function padInk(cs, c) { return c === ERASER ? '#000' : (cs.getPropertyValue((DRAW_COLOURS[c] || DRAW_COLOURS[0])[0]).trim() || '#888'); }
+function padStroke(ctx, cs, seg, from) {
+  const c = pad.canvas, W = c.width, Hh = c.height;
+  ctx.globalCompositeOperation = seg.c === ERASER ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = ctx.fillStyle = padInk(cs, seg.c);
+  ctx.lineWidth = DRAW_WIDTHS[seg.w - 1] * W;
+  ctx.lineCap = ctx.lineJoin = 'round';
+  const pts = from ? [from].concat(seg.pts) : seg.pts;
+  const X = (p) => p[0] / GRID * W, Y = (p) => p[1] / GRID * Hh;
+  if (pts.length === 1) {
+    ctx.beginPath(); ctx.arc(X(pts[0]), Y(pts[0]), ctx.lineWidth / 2, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(X(pts[0]), Y(pts[0]));
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(X(pts[i]), Y(pts[i]));
+  ctx.stroke();
+}
+function padRedraw() {
+  const c = pad.canvas;
+  if (!c || !c.width) return;
+  const ctx = c.getContext('2d');
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cs = getComputedStyle(c);
+  pad.segs.concat(pad.co ? pad.co.pending() : []).forEach((s) => padStroke(ctx, cs, s));
+}
+function padPoint(e) {
+  const r = pad.canvas.getBoundingClientRect();
+  const q = (v, size) => Math.max(0, Math.min(GRID, Math.round(v / size * GRID)));
+  return [q(e.clientX - r.left, r.width), q(e.clientY - r.top, r.height)];
+}
+function padDown(e) {
+  if (!canDraw() || e.button > 0) return;
+  e.preventDefault();
+  if (pad.segs.length >= SEGS_MAX - 4) {
+    if (!pad.fullToast) { pad.fullToast = true; toast('The canvas is full — press Clear to keep drawing'); }
+    return;
+  }
+  if (!pad.co) {
+    const start = pad.segs.reduce((m, s) => Math.max(m, s.n), 0) + 1;
+    pad.co = makeCoalescer({ clock: Date.now, ms: FLUSH_MS, send: padSend, start: start });
+  }
+  try { pad.canvas.setPointerCapture(e.pointerId); } catch (ex) { /* a synthetic event has no pointer to capture */ }
+  const p = padPoint(e);
+  pad.drawing = true; pad.last = p;
+  pad.co.down(p[0], p[1], pad.tool.c, pad.tool.w);
+  const ctx = pad.canvas.getContext('2d');
+  padStroke(ctx, getComputedStyle(pad.canvas), { c: pad.tool.c, w: pad.tool.w, pts: [p] });
+}
+function padMove(e) {
+  if (!pad.drawing || !pad.co) return;
+  const evs = typeof e.getCoalescedEvents === 'function' && e.getCoalescedEvents().length ? e.getCoalescedEvents() : [e];
+  const ctx = pad.canvas.getContext('2d'), cs = getComputedStyle(pad.canvas);
+  evs.forEach((ev) => {
+    const p = padPoint(ev);
+    if (Math.abs(p[0] - pad.last[0]) + Math.abs(p[1] - pad.last[1]) < SEG_MIN_STEP) return;
+    padStroke(ctx, cs, { c: pad.tool.c, w: pad.tool.w, pts: [p] }, pad.last);
+    pad.last = p;
+    pad.co.move(p[0], p[1]);
+  });
+}
+function padUp() {
+  if (!pad.drawing) return;
+  pad.drawing = false;
+  if (pad.co) pad.co.up();
+}
+/* What the coalescer hands over every 400 ms: kept on this screen at once,
+   sent to the strokes document, and never past the rules' 400. */
+function padSend(list) {
+  if (!canDraw()) return;
+  const space = Math.max(0, SEGS_MAX - pad.segs.length);
+  const send = list.slice(0, space);
+  if (!send.length) return;
+  send.map(parseSeg).filter(Boolean).forEach((s) => pad.segs.push(s));
+  noteWrite();
+  const tr = transport();
+  const round = pad.round;
+  /* A drawer who reloaded mid-turn kept the document; one who never picked
+     on this browser (the auto-pick on another tab, say) has not cleared it. */
+  const first = pad.cleared !== round && strokesDoc.seq !== round
+    ? (pad.cleared = round, tr.clearStrokes(round)) : Promise.resolve();
+  first.then(() => tr.strokes(round, send)).catch((e) => { console.warn('strokes', e); toast(describeCloudError(e)); });
+}
+function padClear() {
+  if (!canDraw()) return;
+  pad.segs = []; pad.fullToast = false;
+  if (pad.co) pad.co.reset(pad.co.next());
+  padRedraw();
+  noteWrite();
+  pad.cleared = pad.round;
+  transport().clearStrokes(pad.round).catch((e) => { console.warn('clear', e); toast(describeCloudError(e)); });
+}
+setInterval(() => { if (pad.co && canDraw()) pad.co.tick(); }, 100);
 
 
 /* ═══════════════════════════════ Rendering ═══════════════════════════════ */
@@ -2061,9 +2880,11 @@ function renderHome() {
 
 const PLAYER_BY = () => { const m = {}; players.forEach((p) => { m[p.uid] = p; }); return m; };
 function nickOf(uid) { const p = players.find((x) => x.uid === uid); return p ? p.nick : 'Someone'; }
+/* Two letters for the avatar, from words that START with a letter — so
+   "Priya (online)" is PR, not P( . */
 function initials(nick) {
-  const parts = String(nick).trim().split(/\s+/).filter(Boolean);
-  return (parts.length > 1 ? parts[0][0] + parts[1][0] : String(nick).slice(0, 2)).toUpperCase();
+  const parts = String(nick).trim().split(/\s+/).filter((w) => /^\p{L}/u.test(w));
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || String(nick).trim()).slice(0, 2)).toUpperCase();
 }
 function avatarHtml(p) {
   return '<span class="avatar h' + ((p.hue % 5) + 1) + '" aria-hidden="true">' + esc(initials(p.nick)) + '</span>';
@@ -2137,13 +2958,15 @@ function renderScores(title) {
 /* The host's choices while the lobby is up, read back before every redraw so
    a snapshot arriving mid-choice does not reset the picker. View state, never
    saved: the choices are copied onto the room document when the game starts. */
-let pick = { kind: 'trivia', pack: '', n: '20', secs: '20' };
+let pick = { kind: 'trivia', pack: '', n: '20', secs: '20', rounds: '1', dsecs: '75' };
 function pickState() {
-  const k = $('pickKind'), p = $('pickPack'), n = $('pickN'), s = $('pickSecs');
+  const k = $('pickKind'), p = $('pickPack'), n = $('pickN'), s = $('pickSecs'), rd = $('pickRounds'), ds = $('pickDSecs');
   if (k) pick.kind = k.value;
   if (p) pick.pack = p.value;
   if (n) pick.n = n.value;
   if (s) pick.secs = s.value;
+  if (rd) pick.rounds = rd.value;
+  if (ds) pick.dsecs = ds.value;
 }
 
 function renderLobby() {
@@ -2194,16 +3017,43 @@ function renderResults() {
    countdown that looks like a broken app. */
 function renderRoom() {
   pickState();
+  const overdue = room.phase === 'play' && !iAmHost() && room.game.stepAt && room.game.stepMs
+    && now() > room.game.stepAt + room.game.stepMs + HOST_OVERDUE_MS;
+  const overdueHtml = overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
+        + esc(nickOf(room.host)) + '</strong>’s browser has not moved the game on. If they have gone, the room passes to the next player in three minutes.</p>' : '';
+  const g = room.phase === 'play' ? GAMES[room.kind] : null;
+  /* A game that draws in parts (the drawing game: a canvas mid-stroke and a
+     guess box mid-word) refreshes them in place and says so; the rest of the
+     room is redrawn around it. */
+  if (g && g.refresh && $('roomSide') && g.refresh(room, me, players, now())) {
+    $('overdueSlot').innerHTML = overdueHtml;
+    $('roomSide').innerHTML = renderRoomCard() + renderRoster();
+    return;
+  }
+  const keep = keepTyping();
   let main;
   if (room.phase === 'play') main = renderPlay();
   else if (room.phase === 'results') main = renderResults();
   else main = renderLobby();
-  const overdue = room.phase === 'play' && !iAmHost() && room.game.stepAt && room.game.stepMs
-    && now() > room.game.stepAt + room.game.stepMs + HOST_OVERDUE_MS;
-  $('roomView').innerHTML = '<div class="room"><div class="mainc">'
-    + (overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
-        + esc(nickOf(room.host)) + '</strong>’s browser has not moved the game on. If they have gone, the room passes to the next player in three minutes.</p>' : '')
-    + main + '</div><div class="side">' + renderRoomCard() + renderRoster() + '</div></div>';
+  $('roomView').innerHTML = '<div class="room"><div class="mainc"><div id="overdueSlot">' + overdueHtml + '</div>'
+    + main + '</div><div class="side" id="roomSide">' + renderRoomCard() + renderRoster() + '</div></div>';
+  if (g && g.mount) g.mount(room, me);
+  keep();
+}
+/* A text box inside the room survives a wholesale redraw: its value, caret
+   and focus are read before and put back after, if the new view has a box
+   with the same id. */
+function keepTyping() {
+  const el = document.activeElement;
+  if (!el || el.tagName !== 'INPUT' || !el.id || !$('roomView').contains(el)) return () => {};
+  const id = el.id, v = el.value, s = el.selectionStart, e = el.selectionEnd;
+  return () => {
+    const box = $(id);
+    if (!box) return;
+    box.value = v;
+    box.focus({ preventScroll: true });
+    try { box.setSelectionRange(s, e); } catch (ex) { /* not a text box after all */ }
+  };
 }
 
 /* The cheap tick: the two countdowns change every second, and a full redraw
@@ -2220,7 +3070,7 @@ function tickUI() {
 /* ═══════════════════════ Entering, leaving, the engine ═══════════════════ */
 
 /* The active transport: the demo's in-memory one, or the cloud module's.
-   Both answer the same eleven calls, which is what lets every line below be
+   Both answer the same thirteen calls, which is what lets every line below be
    tested with neither Firebase nor a network. */
 let demoOn = false;
 function transport() { return demoOn ? demoSim : window.brCloud; }
@@ -2274,7 +3124,12 @@ async function leaveRoom(reason) {
   }
   try { await t.leave({ handTo: handTo, closeRoom: closeRoom }); } catch (e) { console.warn('leave', e); }
   t.stop();
-  room = null; players = []; answers = []; demoOn = false;
+  const wasDemo = demoOn;
+  room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
+  if (wasDemo) {
+    const id = window.brCloud && window.brCloud.uid ? window.brCloud.uid() : null;
+    me = ID_RE.test(String(id || '')) ? String(id) : null;
+  }
   pendingRev = 0; pushInFlight = false;
   if (local.code === code) { local.code = ''; save(); }
   render();
@@ -2338,6 +3193,10 @@ window.brApp = {
   me: () => me,
   room: () => room,
   onAuth: (id) => {
+    /* The sign-in can finish AFTER the demo room has opened, and the demo's
+       player is not this uid: overwriting `me` there took the demo's host
+       away from its own room (found in M3). leaveRoom() picks the uid up. */
+    if (demoOn) return;
     me = ID_RE.test(String(id || '')) ? String(id) : null;
     render();
     if (me) afterAuth();
@@ -2358,6 +3217,7 @@ window.brApp = {
   },
   onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); },
   onAnswers: (list) => { answers = normalizeAnswers(list); hostTick(); },
+  onStrokes: (raw) => { strokesDoc = normalizeStrokes(raw); padAdopt(); },
   onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
   onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
   noteWrite: noteWrite,
@@ -2447,19 +3307,105 @@ if (joinArrival) {
    Nothing it does is saved, and leaving it forgets it. */
 const DEMO_PLAYERS = [
   { uid: 'demoPriyaWhoIsOnline000000', nick: 'Priya (online)', hue: 1, awayMs: 0 },
-  { uid: 'demoMarcusAnswersFast00000', nick: 'Marcus (answers fast)', hue: 2, awayMs: 0 },
-  { uid: 'demoLenaAnswersSlowly00000', nick: 'Lena (answers slowly)', hue: 3, awayMs: 0 },
+  /* Twenty characters at most — NICK_MAX slices anything longer, and an
+     earlier pair of names lost their closing bracket to it. */
+  { uid: 'demoMarcusAnswersFast00000', nick: 'Marcus (quick)', hue: 2, awayMs: 0 },
+  { uid: 'demoLenaAnswersSlowly00000', nick: 'Lena (slow)', hue: 3, awayMs: 0 },
   { uid: 'demoTomSteppedAway00000000', nick: 'Tom (stepped away)', hue: 4, awayMs: 10 * 60000 },
 ];
 const DEMO_ME = 'demoYouTheHost000000000000';
+/* The demo's doodles: what an invented drawer can draw, as strokes on the
+   0–1000 grid. A circle is squashed by 3/4 across so it comes out round on
+   the 4:3 canvas. Every word here is in DRAW_WORDS. */
+function demoDoodle(word) {
+  const ring = (cx, cy, r, from, to, n) => Array.from({ length: n + 1 }, (_, i) => {
+    const a = from + (to - from) * i / n;
+    return [Math.round(cx + r * 0.75 * Math.cos(a)), Math.round(cy + r * Math.sin(a))];
+  });
+  const T = Math.PI * 2;
+  const D = {
+    sun: [{ c: 2, w: 3, pts: ring(500, 500, 220, 0, T, 40) }].concat(Array.from({ length: 8 }, (_, i) => {
+      const a = i * T / 8;
+      return { c: 2, w: 3, pts: [[Math.round(500 + 200 * Math.cos(a)), Math.round(500 + 290 * Math.sin(a))], [Math.round(500 + 280 * Math.cos(a)), Math.round(500 + 400 * Math.sin(a))]] };
+    })),
+    house: [{ c: 0, w: 3, pts: [[300, 450], [300, 850], [700, 850], [700, 450], [300, 450]] },
+            { c: 5, w: 3, pts: [[260, 470], [500, 180], [740, 470]] },
+            { c: 0, w: 2, pts: [[450, 850], [450, 650], [550, 650], [550, 850]] },
+            { c: 1, w: 2, pts: [[360, 520], [430, 520], [430, 590], [360, 590], [360, 520]] }],
+    tree: [{ c: 5, w: 4, pts: [[500, 900], [500, 560]] }, { c: 3, w: 3, pts: ring(500, 400, 230, 0, T, 40) }],
+    fish: [{ c: 1, w: 3, pts: ring(450, 500, 260, 0, T, 40) },
+           { c: 1, w: 3, pts: [[640, 500], [800, 380], [800, 620], [640, 500]] }, { c: 0, w: 3, pts: [[350, 450]] }],
+    star: [{ c: 2, w: 3, pts: Array.from({ length: 11 }, (_, i) => {
+      const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 140 : 360;
+      return [Math.round(500 + r * 0.75 * Math.cos(a)), Math.round(520 + r * Math.sin(a))];
+    }) }],
+    heart: [{ c: 4, w: 3, pts: Array.from({ length: 49 }, (_, i) => {
+      const a = i * T / 48;
+      return [Math.round(500 + 16 * Math.pow(Math.sin(a), 3) * 14), Math.round(470 - (13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)) * 18)];
+    }) }],
+    balloon: [{ c: 4, w: 3, pts: ring(500, 380, 220, 0, T, 40) }, { c: 0, w: 1, pts: [[500, 600], [470, 700], [530, 800], [490, 900]] }],
+  };
+  return D[word] || null;
+}
+const DEMO_DOODLES = ['sun', 'house', 'tree', 'fish', 'star', 'heart', 'balloon'];
+/* A doodle as the segment strings a real drawer's coalescer would send, a
+   long line cut where the coalescer would cut it. */
+function doodleSegs(word) {
+  const out = [];
+  let n = 1;
+  (demoDoodle(word) || []).forEach((s) => {
+    for (let i = 0; i < s.pts.length; i += SEG_PTS_MAX - 1)
+      out.push(encodeSeg(n++, s.c, s.w, s.pts.slice(i, i + SEG_PTS_MAX)));
+  });
+  return out;
+}
 const demoSim = (() => {
-  let simRoom = null, simPlayers = {}, simAnswers = {}, code = '', timers = [];
+  let simRoom = null, simPlayers = {}, simAnswers = {}, simStrokes = { seq: 0, segs: [] }, code = '', timers = [], lastKey = '';
   const emit = () => setTimeout(() => {
     if (!simRoom) { window.brApp.onRoom(null); return; }
     window.brApp.onRoom(JSON.parse(JSON.stringify(simRoom)));
     window.brApp.onPlayers(Object.keys(simPlayers).map((u) => Object.assign({ uid: u }, simPlayers[u])));
     window.brApp.onAnswers(Object.keys(simAnswers).map((u) => Object.assign({ uid: u }, simAnswers[u])));
+    if (simRoom.kind === 'draw') window.brApp.onStrokes(JSON.parse(JSON.stringify(simStrokes)));
   }, 0);
+  const later = (ms, fn) => timers.push(setTimeout(() => { if (simRoom) fn(); }, ms));
+  const say = (uid, r, v) => {
+    simAnswers[uid] = { r: r, v: v, at: Date.now() };
+    simPlayers[uid].ansR = r; simPlayers[uid].seenAt = Date.now();
+    emit();
+  };
+  /* The invented players' drawing turns. A drawer among them picks a word it
+     has a doodle for and draws it a segment every 400 ms; the guessers each
+     try a wrong word or two and then the right one at their own pace — they
+     peek at the word, which is the demo's privilege and nobody else's. */
+  const demoDraw = () => {
+    const g = normalizeRoom(simRoom).game;
+    const r = g.round;
+    const drawer = DEMO_PLAYERS.find((p) => p.uid === g.drawer);
+    if (g.step === 'pick' && drawer) {
+      const left = DEMO_DOODLES.filter((w) => g.used.indexOf(DRAW_WORDS.indexOf(w)) === -1);
+      const word = (left.length ? left : DEMO_DOODLES)[Math.floor(Math.random() * (left.length || DEMO_DOODLES.length))];
+      later(2500, () => { simStrokes = { seq: r, segs: [] }; say(drawer.uid, r, encodePick(word, g)); });
+      return;
+    }
+    if (g.step !== 'draw') return;
+    let word = '';
+    if (drawer) {
+      word = resolveWord(g);
+      doodleSegs(word).forEach((s, i) => later(800 + i * FLUSH_MS, () => {
+        if (simStrokes.seq !== r) simStrokes = { seq: r, segs: [] };
+        simStrokes.segs.push(s); emit();
+      }));
+    } else word = resolveWord(g);
+    const pace = { quick: [3000, 9000], online: [7000, 22000], slow: [12000, 45000] };
+    DEMO_PLAYERS.filter((p) => !p.awayMs && p.uid !== g.drawer).forEach((p) => {
+      const kind = /quick/.test(p.nick) ? 'quick' : /slow/.test(p.nick) ? 'slow' : 'online';
+      const [wrongAt, rightAt] = pace[kind];
+      const wrong = DRAW_WORDS[Math.floor(Math.random() * DRAW_WORDS.length)];
+      later(wrongAt + Math.random() * 1500, () => say(p.uid, r, encodeGuess(1, wrong === word ? 'no idea' : wrong)));
+      if (word && (kind !== 'slow' || Math.random() < 0.6)) later(rightAt + Math.random() * 4000, () => say(p.uid, r, encodeGuess(2, word)));
+    });
+  };
   /* A patch from the host, applied the way the cloud's transaction would:
      `stepAt: 'now'` becomes the clock, `rev` goes up by one. */
   const applyPatch = (patch) => {
@@ -2486,13 +3432,19 @@ const demoSim = (() => {
     },
     join: async () => 'not-found',
     listen: () => emit(),
-    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; },
+    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; simStrokes = { seq: 0, segs: [] }; lastKey = ''; },
     push: async (patch) => {
       if (!simRoom) throw Object.assign(new Error('gone'), { code: 'br/gone' });
       const rev = applyPatch(patch);
+      /* Only a NEW step starts the invented players off: the drawing game
+         pushes on every guess, and those must not restart their clocks. */
+      const key = simRoom.phase + ':' + simRoom.kind + ':' + simRoom.game.step + ':' + simRoom.game.round;
+      const fresh = key !== lastKey;
+      lastKey = key;
+      if (fresh && simRoom.phase === 'play' && simRoom.kind === 'draw') { stopTimers(); demoDraw(); }
       /* The invented players answer a new question on their own, each at
          their own pace — which is what shows the speed bonus. */
-      if (simRoom.phase === 'play' && simRoom.game.step === 'ask') {
+      if (fresh && simRoom.phase === 'play' && simRoom.game.step === 'ask') {
         stopTimers();
         const g = GAMES[simRoom.kind];
         DEMO_PLAYERS.filter((p) => !p.awayMs).forEach((p, i) => {
@@ -2516,6 +3468,8 @@ const demoSim = (() => {
       simPlayers[DEMO_ME].ansR = r; simPlayers[DEMO_ME].seenAt = Date.now();
       emit();
     },
+    strokes: async (r, list) => { if (!simRoom) return; if (simStrokes.seq !== r) simStrokes = { seq: r, segs: [] }; simStrokes.segs = simStrokes.segs.concat(list).slice(0, SEGS_MAX); emit(); },
+    clearStrokes: async (r) => { if (!simRoom) return; simStrokes = { seq: r, segs: [] }; emit(); },
     heartbeat: async () => { if (simPlayers[DEMO_ME]) simPlayers[DEMO_ME].seenAt = Date.now(); emit(); },
     claimHost: async () => {},
     extend: async (ms) => { simRoom.expiresAt = ms; simRoom.rev += 1; emit(); return simRoom.rev; },
@@ -2685,13 +3639,14 @@ function setTheme(theme) {
   try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
   document.getElementById('themeSel').value = theme;
   applyThemeColor();
+  padRedraw();   /* the ink is the theme's tokens, read at draw time */
 }
 
 /* On Auto the palette can change with nobody touching the picker — the reader's
    system switches at sunset and theme.css follows on its own. What does NOT
    follow is anything script decided: the theme-color meta tag. */
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if (document.documentElement.getAttribute('data-theme') === 'auto') applyThemeColor();
+  if (document.documentElement.getAttribute('data-theme') === 'auto') { applyThemeColor(); padRedraw(); }
 });
 
 /* ── A row that scrolls sideways, and the two arrows beside it ───────────────
@@ -2799,7 +3754,7 @@ $('roomView').addEventListener('click', (e) => {
     return;
   }
   if (b.id === 'startBtn') { startGame(); return; }
-  if (b.id === 'backBtn') { if (iAmHost()) pushPatch({ phase: 'lobby', kind: null, game: {}, pack: null }); return; }
+  if (b.id === 'backBtn') { if (iAmHost()) pushPatch({ phase: 'lobby', kind: null, game: {}, pack: null, feed: [] }); return; }
   const g = GAMES[room.kind];
   if (g && g.onClick) g.onClick(b, room, me);
 });
@@ -2863,6 +3818,14 @@ closeOnBackdropClick($('packDialog'));
 $('roomView').addEventListener('click', (e) => {
   if (e.target.closest('#packEditBtn')) openPacks();
 });
+/* The picker's options depend on the game, and the drawing estimate on the
+   rounds and seconds — so a change there redraws the lobby. */
+$('roomView').addEventListener('change', (e) => {
+  if (room && room.phase === 'lobby' && /^pick(Kind|Rounds|DSecs)$/.test(e.target.id || '')) render();
+});
+$('roomView').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.id === 'guessBox' && room && room.kind === 'draw') { e.preventDefault(); sendGuess(room, me); }
+});
 
 function startGame() {
   pickState();
@@ -2870,7 +3833,7 @@ function startGame() {
   if (!g || !iAmHost()) return;
   const built = g.setup(pick, players, local);
   if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
-  pushPatch({ phase: 'play', kind: g.id, game: built.game, pack: built.pack || null });
+  pushPatch({ phase: 'play', kind: g.id, game: built.game, pack: built.pack || null, feed: [] });
 }
 
 /* ── The Invite window ─────────────────────────────────────────────────────
@@ -2919,6 +3882,7 @@ const HELP = {
   online: ['What the Online Dot Means', `<p>Every player’s browser <strong>writes a heartbeat every 90 seconds</strong>, and the dot is green while that last write is <strong>under four minutes old</strong>. There is no instant “went offline” signal — a closed laptop simply stops writing, and the dot goes grey a few minutes later.</p>
     <p>The host’s dot matters most: if the host’s browser has been silent for <strong>three minutes</strong>, the player who has been in the room longest takes over running it, and the game carries on from where the room says it is.</p>`],
   scores: ['How Points Are Worked Out', `<p>A correct answer is worth <strong>100 points plus a speed bonus of up to 100</strong>: the bonus is the share of the question’s time that was still left when the answer arrived, so an answer at the halfway mark earns 150 in all. A wrong answer, or none, earns nothing and costs nothing.</p>
+    <p><strong>Drawing &amp; Guess</strong> works the same way for a guesser — 100 for getting the word plus up to 100 for speed — and the <strong>drawer earns 50 for every player who gets it</strong>, so a clear drawing pays.</p>
     <p>Timing is measured by the <strong>server’s clock</strong> on both ends — when the question opened and when your answer landed — never by your own computer’s, so a slow laptop clock cannot help or hurt. Points <strong>carry across games</strong> for the whole night; someone who joins late starts on nought.</p>`],
 };
 const helpDialog = $('helpDialog');
@@ -3080,6 +4044,15 @@ window.__brTestHooks = {
   transport: transport, hostTick: hostTick,
   PACKS: PACKS, PACK_LIST: PACK_LIST, parsePack: parsePack, packFor: packFor, questionAt: questionAt, shuffled: shuffled,
   REVEAL_MS: REVEAL_MS, CUSTOM_PACK_ID: CUSTOM_PACK_ID, __myPick: () => myPick,
+  DRAW_WORDS: DRAW_WORDS, PICK_MS: PICK_MS, PICK_GRACE_MS: PICK_GRACE_MS, TURN_END_MS: TURN_END_MS, HINT_AT: HINT_AT,
+  DRAWER_PTS: DRAWER_PTS, GUESS_MAX: GUESS_MAX, SEGS_MAX: SEGS_MAX, SEG_PTS_MAX: SEG_PTS_MAX, FLUSH_MS: FLUSH_MS, GRID: GRID,
+  ERASER: ERASER, DRAW_COLOURS: DRAW_COLOURS, FREE_READS: FREE_READS,
+  sha256Hex: sha256Hex, wordKey: wordKey, hashWord: hashWord, guessMatches: guessMatches, choicesFor: choicesFor,
+  resolveWord: resolveWord, wordShape: wordShape, encodePick: encodePick, parsePick: parsePick, encodeGuess: encodeGuess,
+  parseGuess: parseGuess, cleanGuess: cleanGuess, blanksFor: blanksFor, hintPositions: hintPositions,
+  encodeSeg: encodeSeg, parseSeg: parseSeg, normalizeStrokes: normalizeStrokes, makeCoalescer: makeCoalescer, drawCost: drawCost,
+  demoDoodle: demoDoodle, doodleSegs: doodleSegs, DEMO_DOODLES: DEMO_DOODLES,
+  __pad: () => pad, __strokesDoc: () => strokesDoc, __myDraw: () => myDraw, __setDraw: (w) => { myDraw = w; },
 };
 </script>
 
@@ -3132,7 +4105,7 @@ const inFrame = (() => { try { return window.top !== window.self; } catch (e) { 
 const cloudOn = typeof FIREBASE_CONFIG.apiKey === 'string' && FIREBASE_CONFIG.apiKey.length > 0 && !inFrame && !window.brHalted;
 
 let A, F, auth, db, user = null;
-let unsubs = [], listening = null, answersUnsub = null, relistenTimer = null;
+let unsubs = [], listening = null, answersUnsub = null, strokesUnsub = null, strokesFailedAt = 0, relistenTimer = null;
 let roomExpiresMs = 0, roomHost = null;
 /* The clock offset: Date.now() when this browser last wrote a sentinel, and
    what the server resolved it to, read back from the players listener. */
@@ -3142,6 +4115,7 @@ const RELISTEN_MS = 60000;
 const roomRef = (code) => F.doc(db, 'rooms', code);
 const playerRef = (code, uid) => F.doc(db, 'rooms', code, 'players', uid);
 const answerRef = (code, uid) => F.doc(db, 'rooms', code, 'answers', uid);
+const strokesRef = (code) => F.doc(db, 'rooms', code, 'live', 'strokes');
 const ts = (ms) => F.Timestamp.fromMillis(ms);
 /* A snapshot's Timestamps become milliseconds here, so the boundary in the
    classic script deals in numbers — and still accepts a Timestamp shape,
@@ -3200,6 +4174,7 @@ function updateNote() {
 function stopListening() {
   unsubs.forEach((u) => u()); unsubs = [];
   if (answersUnsub) { answersUnsub(); answersUnsub = null; }
+  if (strokesUnsub) { strokesUnsub(); strokesUnsub = null; }
   listening = null; roomHost = null;
   clearTimeout(relistenTimer); relistenTimer = null;
 }
@@ -3229,6 +4204,21 @@ function syncAnswersListener(code, host) {
     window.brApp.onAnswers([]);
   }
 }
+/* The strokes listener is for a drawing game only — everyone in the room
+   reads the one document while a game is on, and nobody pays for it
+   otherwise. A refused read is tried again on a later snapshot, at most every
+   thirty seconds, rather than on every one. */
+function syncStrokesListener(code, r) {
+  const want = r.kind === 'draw' && r.phase === 'play';
+  if (want && !strokesUnsub && Date.now() - strokesFailedAt > 30000) {
+    strokesUnsub = F.onSnapshot(strokesRef(code), (s) => {
+      if (s.metadata.hasPendingWrites) return;
+      window.brApp.onStrokes(s.exists() ? plain(s.data()) : null);
+    }, (e) => { console.warn('strokes', e); strokesFailedAt = Date.now(); if (strokesUnsub) { strokesUnsub(); strokesUnsub = null; } });
+  } else if (!want && strokesUnsub) {
+    strokesUnsub(); strokesUnsub = null;
+  }
+}
 function listenTo(code) {
   if (!user || !F || !code) return;
   if (listening === code) return;
@@ -3241,6 +4231,7 @@ function listenTo(code) {
     roomExpiresMs = Number(r.expiresAt) || 0;
     roomHost = r.host;
     syncAnswersListener(code, r.host);
+    syncStrokesListener(code, r);
     window.brApp.onRoom(r);
   }, onListenError));
   unsubs.push(F.onSnapshot(F.collection(db, 'rooms', code, 'players'), (q) => {
@@ -3261,7 +4252,7 @@ function listenTo(code) {
   }, onListenError));
 }
 
-/* ── The eleven calls ───────────────────────────────────────────────────────── */
+/* ── The thirteen calls ─────────────────────────────────────────────────────── */
 function needUser() { if (!user) throw Object.assign(new Error('not signed in'), { code: 'unauthenticated' }); }
 function playerDoc(nick, joinedAt, hue) {
   sentAt = Date.now();
@@ -3334,6 +4325,18 @@ async function answer(r, v) {
   b.update(playerRef(code, user.uid), { ansR: r, seenAt: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
   await b.commit();
 }
+/* The drawer's strokes: every flush is ONE merge write of the new segments
+   with arrayUnion, and a clear is a plain set — which is also how a new turn
+   starts, `seq` being the round the drawing belongs to. The rules let only
+   the drawer the room names write here, and never past 400 segments. */
+async function strokes(round, list) {
+  needUser();
+  await F.setDoc(strokesRef(listening), { seq: round, segs: F.arrayUnion(...list), at: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) }, { merge: true });
+}
+async function clearStrokes(round) {
+  needUser();
+  await F.setDoc(strokesRef(listening), { seq: round, segs: [], at: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
+}
 async function heartbeat() {
   needUser();
   sentAt = Date.now();
@@ -3361,6 +4364,10 @@ async function leave(opts) {
   if (!user || !listening) return;
   const code = listening;
   const o = opts || {};
+  /* The answers listener goes FIRST: the moment the seat is handed on, the
+     rules refuse this browser's read of the answers, and a listener still
+     attached says so in the console. */
+  if (o.handTo && answersUnsub) { answersUnsub(); answersUnsub = null; }
   if (o.handTo) { try { await push({ host: o.handTo }); } catch (e) { console.warn('handoff on leave', e); } }
   try { await F.deleteDoc(answerRef(code, user.uid)); } catch (e) { /* there may be none */ }
   try { await F.deleteDoc(playerRef(code, user.uid)); } catch (e) { /* already gone */ }
@@ -3371,6 +4378,7 @@ window.brCloud = {
   on: cloudOn,
   uid: () => (user ? user.uid : null),
   create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
+  strokes: strokes, clearStrokes: clearStrokes,
   claimHost: claimHost, extend: extend, leave: leave,
   listen: listenTo, stop: stopListening,
 };
