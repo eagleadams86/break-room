@@ -1877,7 +1877,7 @@ GAMES.trivia = {
   },
   extra() { return '<button type="button" id="packEditBtn">Custom Packs…</button>'; },
   setup(pk, list, loc) {
-    let pack = null, packId = pk.pack;
+    let pack = null, packId;
     if (String(pk.pack).indexOf(CUSTOM_PACK_ID + ':') === 0) {
       pack = loc.packs[Number(pk.pack.split(':')[1])] || null;
       packId = CUSTOM_PACK_ID;
@@ -3091,7 +3091,7 @@ window.__brTestHooks = {
    loading a byte of this.
 
    The config below is Firebase's PUBLIC client config, not a secret — access is
-   enforced by firestore.rules. While it is null the app is fully local: every
+   enforced by firestore.rules. While it is empty the app is fully local: every
    door on the home card says so, and the demo room is the only room there is.
 
    ANONYMOUS, STATED PLAINLY: `signInAnonymously` happens the moment the page
@@ -3103,9 +3103,16 @@ window.__brTestHooks = {
    PROFILE ARE ONE PLAYER for the same reason.
 ──────────────────────────────────────────────────────────────────────────── */
 
-/* Firebase's PUBLIC web client config. Null until the project exists — the
-   README's "Setting Up the Cloud" is the checklist that produces it. */
-const FIREBASE_CONFIG = null;
+/* Firebase's PUBLIC web client config. EMPTY until the project exists — the
+   README's "Setting Up the Cloud" is the checklist that produces it; paste the
+   console's `firebaseConfig` fields inside the braces. An empty object rather
+   than null, and the guard below reads a FIELD rather than the object, because
+   `{}` is truthy and a constant null is a guard CodeQL rightly calls dead
+   (League Night's lesson, 2026-09): the test is `apiKey`, the one field without
+   which nothing can be initialised. */
+const FIREBASE_CONFIG = {
+  /* apiKey: "…", authDomain: "…", projectId: "…", storageBucket: "…", messagingSenderId: "…", appId: "…" */
+};
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';
 const privacyNote = document.getElementById('privacyNote');
@@ -3113,7 +3120,7 @@ const privacyNote = document.getElementById('privacyNote');
 /* The harness boots this page in a frame, and the suite must never reach the
    cloud; a halted page must not either. Decided once, before anything loads. */
 const inFrame = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
-const cloudOn = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey) && !inFrame && !window.brHalted;
+const cloudOn = typeof FIREBASE_CONFIG.apiKey === 'string' && FIREBASE_CONFIG.apiKey.length > 0 && !inFrame && !window.brHalted;
 
 let A, F, auth, db, user = null;
 let unsubs = [], listening = null, answersUnsub = null, relistenTimer = null;
@@ -3362,7 +3369,7 @@ updateNote();
 if (cloudOn) {
   init().catch((e) => { console.warn('Cloud unavailable:', e); window.brCloud.on = false; window.brApp.onError(e); });
 } else if (!inFrame && !window.brHalted) {
-  /* The ordinary visit with the config still null, or a halted page. Nothing
+  /* The ordinary visit with the config still empty, or a halted page. Nothing
      to do; the home card has already said so. */
 }
 </script>

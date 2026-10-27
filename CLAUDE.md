@@ -122,7 +122,7 @@ link; host reload mid-game; hidden-tab countdown on return) wait for the console
 `leave`), the lobby with roster and dots, the room card with the expiry countdown and
 Extend, the Invite window and `#join=` arrival (lenient, fragment stripped at once), the
 host loop (`hostTick`: one push at a time, waits for its own rev), the handoff, and the demo
-transport (`demoSim`) with four invented players. `FIREBASE_CONFIG` is still null: nothing
+transport (`demoSim`) with four invented players. `FIREBASE_CONFIG` is still empty: nothing
 cloud-side has been exercised against a real project yet — the module is argued from
 League Night's and the rules, not observed. `EXPECTED` 111.
 

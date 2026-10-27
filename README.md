@@ -100,7 +100,7 @@ of all Google sign-in for a standing house with a cross-night leaderboard (6).
 ## Setting Up the Cloud
 
 The module at the foot of `index.html` carries `FIREBASE_CONFIG` (Firebase's public web
-client config, not a secret — access is enforced by `firestore.rules`). While it is `null`
+client config, not a secret — access is enforced by `firestore.rules`). While it is empty
 the app is fully local and nothing is ever sent anywhere. These are the console steps that
 turn it on; none of them can be done from a terminal, so they wait for Charles:
 
