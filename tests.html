@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 229;
+const EXPECTED = 231;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -1164,6 +1164,37 @@ function define() {
     ok(!D.getElementById('extendBtn'), 'a player may not extend');
     ok(/Waiting for Ada/.test(D.getElementById('roomView').textContent), 'and is told whose move it is');
     ok(D.getElementById('leaveBtn'), 'but may leave');
+    } finally { home(); }
+  });
+  t('every player sees the games and their options; only the host can start one', () => {
+    try {
+    const D = W.document;
+    inLobby(U.b);
+    const kinds = [...D.querySelectorAll('#pickKind option')].map((o) => o.value);
+    ok(kinds.length >= 4 && kinds.indexOf('trivia') !== -1 && kinds.indexOf('codenames') !== -1, 'a player can look through every game', kinds.join());
+    ok(!D.querySelector('#pickKind').disabled, 'and open the list (a disabled box would hide it)');
+    ok(D.getElementById('pickN') || D.getElementById('pickPack'), 'and see the chosen game’s options');
+    ok(!D.getElementById('startBtn'), 'but there is no Start button');
+    ok(/Only Ada, the host, can start a game/.test(D.getElementById('pickNote').textContent), 'and the words say who can');
+    ok(/Waiting for Ada/.test(D.getElementById('roomView').textContent), 'still told whose move it is');
+    inLobby(U.host);
+    ok(D.getElementById('startBtn') && !D.getElementById('pickNote'), 'the host has Start and no note');
+    } finally { home(); }
+  });
+  t('the host can make an online player host between games — not mid-game, not an away player', () => {
+    try {
+    const D = W.document;
+    const btns = () => [...D.querySelectorAll('[data-make-host]')].map((b) => b.getAttribute('data-make-host'));
+    inLobby(U.host);
+    eq(btns(), [U.b], 'Ben (online) gets the button; Cat (away) and the host do not');
+    ok(/Make Ben the host/.test(D.querySelector('[data-make-host]').getAttribute('aria-label')), 'and it names who');
+    H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', scores: { [U.b]: 150 } }));
+    eq(btns(), [U.b], 'at the results too, so the next host picks the next game');
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'poker', game: { step: 'ask', stepAt: T0, stepMs: 20000, round: 1 } }));
+    eq(btns(), [], 'never mid-game: the host’s browser is the engine');
+    inLobby(U.b);
+    eq(btns(), [], 'a player cannot hand on a seat that is not theirs');
+    ok(/async function handHost\(uid\) \{\s*if \(!user \|\| !listening\) return;\s*if \(answersUnsub\)[\s\S]{0,120}await push\(\{ host: uid \}\);/.test(APP_SRC), 'the module drops the host-only listeners before the seat moves');
     } finally { home(); }
   });
   t('Extend is withheld at the twelve-hour limit', () => {

@@ -95,8 +95,14 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 229 (227 at M6; +1 stale-room fix, +1 pasted-link fix
-below). **Pasted invite links (fixed 2026-10-27):** `#join=` / `#house=` were read only at
+**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 231 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host below). **Shared picker + Make Host (2026-10-27):** every
+player's lobby renders the picker (view state only, never written); only the host gets
+`#startBtn`. The host hands the seat on with `[data-make-host]` → `brCloud.handHost` (drops
+the answers/key listeners FIRST, like `leave()`, then `push({host})`) — online players,
+NEVER during `play` (the host's browser is the engine), never in the demo. No rules change.
+Real-cloud checked with two Playwright contexts: handed over, new host started trivia, zero
+console errors. **Pasted invite links (fixed 2026-10-27):** `#join=` / `#house=` were read only at
 load, so a link pasted into a tab ALREADY on the app (hash change, no reload) did nothing; a
 `hashchange` listener now reads both. Keep it. **Tonight's room can go stale (fixed 2026-10-27):** the last player out deletes the
 room doc, but the house kept `room`/`roomExp`, so the card said "tonight's room is open" and

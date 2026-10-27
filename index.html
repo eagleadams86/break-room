@@ -4234,11 +4234,21 @@ function renderRoster() {
           + avatarHtml(p)
           + '<span class="who">' + esc(p.nick) + (p.uid === me ? ' <span class="you">(you)</span>' : '') + '</span>'
           + (p.uid === room.host ? '<span class="pill ok">host</span>' : '')
+          + (canHandTo(p, t) ? '<button type="button" class="btn-small" data-make-host="' + esc(p.uid) + '" aria-label="Make '
+              + esc(p.nick) + ' the host">Make Host</button>' : '')
           + '</li>';
       }).join('')
     + '</ul></div>';
 }
 
+/* Handing the seat on without leaving (Charles, 2026-10-27): the host may
+   make any ONLINE player host, between games only — mid-game the host's
+   browser is the engine (answers, the spymaster key), and swapping engines
+   mid-round is a stall waiting to happen. Never in the demo: its invented
+   players cannot run a room. */
+function canHandTo(p, t) {
+  return !!room && iAmHost() && !demoOn && room.phase !== 'play' && !!p && p.uid !== me && isOnline(p, t);
+}
 function renderRoomCard() {
   const t = now();
   const left = room.expiresAt - t;
@@ -4297,7 +4307,12 @@ function pickState() {
 function renderLobby() {
   const kinds = Object.keys(GAMES);
   let picker = '';
-  if (iAmHost()) {
+  /* EVERYONE sees the games and their options (Charles, 2026-10-27): a
+     player can look through what's on offer and suggest the next one, and a
+     player handed the host's seat finds their choices already made. Only the
+     host gets the Start button; the picks are this browser's own view state
+     either way — nothing a player chooses here is written anywhere. */
+  {
     if (!kinds.length) {
       picker = '<p class="lede">The games arrive with the next milestone. For now the room is a place to see who’s here.</p>';
     } else {
@@ -4309,13 +4324,16 @@ function renderLobby() {
         + (g.options ? g.options(pick) : '')
         + '</div>'
         + '<div class="row-actions" style="justify-content:flex-start">'
-        + '<button type="button" class="primary" id="startBtn">Start ' + esc(g.name) + '</button>'
+        + (iAmHost() ? '<button type="button" class="primary" id="startBtn">Start ' + esc(g.name) + '</button>' : '')
         + (g.extra ? g.extra() : '') + '</div>'
+        + (iAmHost() ? '' : '<p class="hint" id="pickNote">Only <strong>' + esc(nickOf(room.host)) + '</strong>, the host, can start a game — '
+            + 'suggest one on the call, or ask to be made host.</p>')
         + '<p class="warn-line" id="lobbyWarn" role="status"></p>';
     }
-  } else {
+  }
+  if (!iAmHost()) {
     picker = '<p class="lede">Waiting for <strong>' + esc(nickOf(room.host)) + '</strong> to start a game. '
-      + 'Keep the call open — the room is the game, the call is the talking.</p>';
+      + 'Keep the call open — the room is the game, the call is the talking.</p>' + picker;
   }
   return '<div class="card"><h2>Lobby</h2>' + picker + '</div>' + renderScores('Scores So Far');
 }
@@ -4441,6 +4459,15 @@ function heartbeat() {
 /* Out of a room. As the host with others online, the room is HANDED to the
    next player first, so it never waits three minutes for a handoff it could
    have had at once; as the last one out, the room is closed. */
+async function handHost(uid) {
+  const p = players.find((x) => x.uid === uid);
+  if (!p || !canHandTo(p, now())) return;
+  if (!confirm('Make ' + p.nick + ' the host? They pick and start the games from now on; you stay in the room as a player.')) return;
+  pickState();
+  noteWrite();
+  try { await transport().handHost(uid); toast(p.nick + ' is the host now'); }
+  catch (e) { console.warn('hand host', e); toast(describeCloudError(e)); }
+}
 async function leaveRoom(reason, opts) {
   const t = transport();
   const code = local.code;
@@ -5437,6 +5464,7 @@ $('roomView').addEventListener('click', (e) => {
     return;
   }
   if (b.id === 'startBtn') { startGame(); return; }
+  if (b.hasAttribute('data-make-host')) { handHost(b.getAttribute('data-make-host')); return; }
   if (b.id === 'backBtn') { if (iAmHost()) pushPatch({ phase: 'lobby', kind: null, game: {}, pack: null, feed: [] }); return; }
   const g = GAMES[room.kind];
   if (g && g.onClick) g.onClick(b, room, me);
@@ -6572,12 +6600,21 @@ async function leave(opts) {
   if (o.closeRoom) { try { await F.deleteDoc(roomRef(code)); } catch (e) { /* somebody else took it */ } }
 }
 
+/* Handing the seat on while staying: the host-only listeners go FIRST, as
+   in leave(), so the rules' refusal of this browser's next read never
+   reaches the console. */
+async function handHost(uid) {
+  if (!user || !listening) return;
+  if (answersUnsub) { answersUnsub(); answersUnsub = null; }
+  if (keyUnsub) { keyUnsub(); keyUnsub = null; }
+  await push({ host: uid });
+}
 window.brCloud = {
   on: cloudOn,
   uid: () => (user ? user.uid : null),
   create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
   strokes: strokes, clearStrokes: clearStrokes, writeKey: writeKey,
-  claimHost: claimHost, extend: extend, leave: leave,
+  claimHost: claimHost, extend: extend, leave: leave, handHost: handHost,
   listen: listenTo, stop: stopListening,
   /* M6 */
   google: () => isGoogle(user), signIn: requireSignIn, signOut: signOut, saveNick: saveNick,

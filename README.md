@@ -17,6 +17,18 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
+**Taking turns as host (27 October 2026).**
+
+- **Everyone sees the games.** Every player's lobby shows the game list and each game's
+  options, so anyone can look through what's on offer and suggest the next one. Only the
+  host has the *Start* button; what a player picks stays in their own browser.
+- **Make Host.** Between games (in the lobby or at the results), the host has a
+  *Make Host* button beside each online player in *Who's Here*. Press it and that player
+  picks and starts the next game, finding their choices already set; the old host stays
+  in the room as a player. Not offered mid-game, since the host's browser runs the game.
+- **Invite links work in an open tab.** A room or house link pasted into a tab that already
+  has Break Room open is followed (it used to be ignored until a reload).
+
 **Milestone 6 — Google sign-in and houses (27 October 2026).** Optional, and only for a
 group that meets again:
 
