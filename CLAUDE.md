@@ -234,3 +234,7 @@ Firebase console steps are a numbered checklist in the README and need Charles.
 - Escape everything rendered with `esc()`. Every nickname, question and answer on screen
   was typed in another browser: it is untrusted input on the shared origin.
 - Keep README.md current in the same commit as the change it describes.
+- **No GitHub Releases for this app** (Charles, 2026-10-27) — unlike the family's
+  single-file apps. A downloaded copy cannot host a room (the cloud answers only the live
+  site and `localhost:8026`), so a release zip is waste. The 2026-10-27 release and tag were
+  deleted. A milestone ships when it is merged and the Pages deploy is confirmed.
