@@ -96,7 +96,15 @@ leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house 
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
 **SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 227.
-`GOOGLE_CLIENT_ID` is null until the console step in README step 9.
+The console step (README step 9) is done and `GOOGLE_CLIENT_ID` is set. Observed against the real
+cloud from Charles's Chrome plus a Playwright guest: an anonymous host signed in and kept
+the SAME uid and the host's seat; a reload kept the Google session; a house created and
+listed from `users/{uid}`; tonight's room opened from it; the guest refused (`permission-
+denied`) reading the house, writing itself into `members`, writing its own users doc and
+creating a house; the board counted 150 then only the difference to 400, one night, the
+guest left off; sign-out left as the account and rejoined as a new anonymous player with
+the code kept. NOT observed: a second Google account joining by `#house=` link, and the
+`credential-already-in-use` switch.
 
 **Things a tidy-up would break (M6):**
 - **Sign-in LINKS (`linkWithCredential`) onto the anonymous uid, never signs in fresh.** The

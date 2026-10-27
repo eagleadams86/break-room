@@ -5865,7 +5865,7 @@ const FIREBASE_CONFIG = {
    corporate filter blocks firebaseapp.com hostnames (the family's GIS flow,
    League Night's code). While it is null the Sign In button says sign-in is
    not set up, and nothing else changes: rooms stay anonymous. */
-const GOOGLE_CLIENT_ID = null;
+const GOOGLE_CLIENT_ID = "168957055210-jnc950lb96j708unp11882eguus6iqi9.apps.googleusercontent.com";
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';
 const GIS = 'https://accounts.google.com/gsi/client';
@@ -5903,7 +5903,10 @@ const houseRef = (id) => F.doc(db, 'houses', id);
 const isGoogle = (u) => !!(u && !u.isAnonymous && (u.providerData || []).some((p) => p.providerId === 'google.com'));
 function accountOf(u) {
   if (!isGoogle(u)) return { google: false, name: '' };
-  const raw = String(u.displayName || u.email || 'Signed in').trim();
+  /* A LINKED account has no top-level displayName (the anonymous user it
+     grew from had none); Google's own profile is in providerData. */
+  const g = (u.providerData || []).find((p) => p.providerId === 'google.com') || {};
+  const raw = String(u.displayName || g.displayName || u.email || g.email || 'Signed in').trim();
   return { google: true, name: raw.split(/[\s@]+/)[0].slice(0, 20) || 'Signed in' };
 }
 const ts = (ms) => F.Timestamp.fromMillis(ms);

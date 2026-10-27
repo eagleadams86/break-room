@@ -267,7 +267,9 @@ place today.
    In button says sign-in isn't set up and nothing else changes). Then **re-publish
    `firestore.rules`**: it gained the `users` and `houses` blocks and a room's optional
    `house` label. A plain room never carries `house`, so the old rules keep working until
-   the paste. Anonymous stays ON — rooms still need it.
+   the paste. Anonymous stays ON — rooms still need it. *Done 27 October 2026* — provider
+   on (public-facing name "Break Room"), both origins added, client
+   `168957055210-jnc950lb96j708unp11882eguus6iqi9`, rules published byte for byte.
 
 The kill switch, if a room is ever abused: **Authentication → Sign-in method → Anonymous →
 disable.** Every door closes at once, nothing is lost, and the rules can be tightened in the

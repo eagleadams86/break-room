@@ -2623,7 +2623,11 @@ function define() {
   t('the popup opens inside the gesture: every door warmed, nothing awaited on the warm path', () => {
     const mod = MOD();
     ok(/const SIGNIN_DOORS = \['syncBtn', 'houseSignInBtn'\];/.test(mod), 'both doors');
-    ['syncBtn', 'houseSignInBtn'].forEach((id) => ok(new RegExp('id="' + id + '"').test(APP_SRC.replace(/<script[\s\S]*?<\/script>/g, '')), id + ' is in the markup, where the module can find it'));
+    /* The markup is everything before the classic script opens. Sliced, not
+       stripped: a tag-stripping regex is the shape CodeQL flags. */
+    const markup = APP_SRC.slice(0, APP_SRC.indexOf("<script>\n'use strict';"));
+    ok(markup.length > 1000, 'the markup was found');
+    ['syncBtn', 'houseSignInBtn'].forEach((id) => ok(new RegExp('id="' + id + '"').test(markup), id + ' is in the markup, where the module can find it'));
     ok(/for \(const ev of \['pointerenter', 'pointerdown', 'focus'\]\)/.test(mod), 'warmed before the click');
     ok(/if \(!tokenClient\) \{\s*try \{ await warmGis\(\); \}/.test(mod), 'the only await is on the cold path');
     ok(/if \(!popupIsAffordable\(\)\)/.test(mod), 'and a cold press asks for a second one rather than opening a dead tab');
