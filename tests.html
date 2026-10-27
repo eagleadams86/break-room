@@ -440,7 +440,7 @@ function define() {
        'the host list is pinned exactly');
     ok(/script-src 'self' 'unsafe-inline' https:\/\/www\.gstatic\.com;/.test(csp), 'gstatic is the only script host');
     ok(!/frame-src/.test(csp), 'no frames until Google sign-in arrives');
-    ok(csp.indexOf('firebaseapp.com') === -1, 'and never the hostname the corporate filter blocks');
+    ok((csp.match(/https?:\/\/[^\s;']+/g) || []).every((h) => !/\.firebaseapp\.com$/.test(h)), 'and never the hostname the corporate filter blocks');
   });
   t('manifest-src and worker-src are spelled out, not left to fall back', () => {
     const csp = (APP_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
@@ -728,7 +728,7 @@ function define() {
     ok(!/href="privacy\.html"/.test(PRIVACY_SRC), 'you are standing on that page');
     ok(/anonymously/.test(PRIVACY_SRC), 'it says the sign-in is anonymous');
     ok(/within about a day/.test(PRIVACY_SRC), 'and that a room is deleted');
-    ok(PRIVACY_SRC.indexOf('www.gstatic.com') > -1, 'and names the one third-party script');
+    ok(/<code>www\.gstatic\.com<\/code>/.test(PRIVACY_SRC), 'and names the one third-party script');
     ok(PRIVACY_SRC.indexOf('break-room') > -1 && PRIVACY_SRC.indexOf('github.com/eagleadams86/starter') === -1, 'its links are this repo’s');
   });
   t('</main> closes BEFORE <footer>, on both pages', () => {
