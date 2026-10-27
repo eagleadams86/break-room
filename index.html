@@ -948,6 +948,17 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .cost-line { grid-column: 1 / -1; margin: 0; }
   .cost-line.over { color: var(--warn); }
 
+  /* ── Icebreakers ───────────────────────────────────────────────────────────
+     An answer on screen is a quotation — set off by a rule, not a colour —
+     and the "who wrote it" buttons carry the player's avatar beside the
+     name, in the same answer grid as trivia. */
+  .ice-quote { margin: 0 0 var(--sp-5); padding: var(--sp-3) 0 var(--sp-3) var(--sp-5); border-left: 3px solid var(--border-strong);
+               font-size: var(--fs-lg); overflow-wrap: anywhere; }
+  .ice-who { display: inline-flex; align-items: center; gap: var(--sp-3); }
+  .ice-picks, .ice-mine { margin: var(--sp-4) 0 0; padding-left: 1.2em; overflow-wrap: anywhere; }
+  .ice-picks li, .ice-mine li { margin: var(--sp-2) 0; }
+  .ice-cards { grid-template-columns: 1fr; }
+
   /* A textarea for a pasted pack, in the mono face so the pipes line up. */
   #packText { font-family: var(--font-mono); font-size: var(--fs-xs); min-height: 12em; resize: vertical; }
 </style>
@@ -1223,7 +1234,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 2;
+const SCHEMA = 3;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -2838,6 +2849,499 @@ function padClear() {
 }
 setInterval(() => { if (pad.co && canDraw()) pad.co.tick(); }, 100);
 
+/* ══════════════════════════════ Icebreakers ══════════════════════════════
+   One game with three modes, all built on the same two halves: everybody
+   WRITES something about themselves (or the funniest answer to a prompt),
+   then the room plays with what came in, ANONYMISED.
+
+   • whoSaid   — a prompt ("my most useless talent"); the answers are shuffled
+                 into cards, and for each card the room guesses who wrote it
+                 (15 s). 50 for a right guess; the author earns 25 for every
+                 player they fooled.
+   • twoTruths — everyone writes two truths and a lie about themselves; one
+                 player's three statements at a time, shuffled, and the rest
+                 pick the lie (20 s). Same 50 / 25.
+   • prompt    — a silly prompt; every answer on screen at once and everybody
+                 votes for a favourite that is not their own (30 s). 100 a vote.
+
+   THE AUTHOR MAP NEVER TOUCHES THE ROOM DOCUMENT. Which card is whose (and,
+   for two truths, which statement is the lie) is written to `live/key`,
+   which the rules let only the uids in `game.spies` read — `[host]`. The
+   host's browser writes the key FIRST and the cards second (pushPatch, from
+   the patch's `_key`), and both carry the same `nonce`, so a key from an
+   earlier deal is never mistaken for this one. A handed-off host is not in
+   `spies` — the handoff clause may change only `host` and `rev` — so the
+   new host's FIRST step() is a patch naming itself, after which its key
+   listener can read the map and the game carries on from where it was.
+
+   Like the drawing game's hash, this hides the authors from the honest
+   screen, not from a curious host: the host's browser reads every answer
+   (the rules' "host-read only"), so a host with the console open could know.
+   That is the plan's bar for a party game.
+
+   A player's OWN card is recognised by this browser only (it remembers what
+   it wrote, in memory); the host ignores a guess or a vote on your own card
+   whatever the screen showed, because the key knows. A reload forgets what
+   it wrote and may offer the buttons on your own card — pressing one scores
+   nothing, which is the honest outcome. */
+const ICE_MODES = ['whoSaid', 'twoTruths', 'prompt'];
+const ICE_MODE_NAMES = { whoSaid: 'Who Said It?', twoTruths: 'Two Truths and a Lie', prompt: 'Best Answer' };
+const ICE_TEXT_MAX = 120;            /* the answer document's string cap in the rules */
+const ICE_PROMPTS_MAX = 3;
+const ICE_WRITE_MS = 75000;
+const ICE_TRUTHS_WRITE_MS = 120000;
+const ICE_GUESS_MS = 15000;
+const ICE_LIE_MS = 20000;
+const ICE_VOTE_MS = 30000;
+const ICE_REVEAL_MS = 6000;
+const ICE_VOTE_REVEAL_MS = 10000;
+/* How long past a step's time the host waits for a key it cannot read
+   before giving the prompt up — a key the rules refuse would otherwise
+   hold the room on one card for ever. */
+const ICE_KEY_WAIT_MS = 20000;
+const ICE_GUESS_PTS = 50;
+const ICE_FOOL_PTS = 25;
+const ICE_VOTE_PTS = 100;
+/* Written for this project: about you but nothing personal, and nothing a
+   colleague would mind reading out on a work call. */
+const ICE_PROMPTS = {
+  whoSaid: [
+    'The first concert I ever went to', 'A food I will never eat again', 'My most useless talent',
+    'The job I wanted when I was ten', 'A film I have seen far too many times', 'The strangest thing in my fridge right now',
+    'My go-to karaoke song', 'A skill I would love to learn', 'The best trip I have ever taken',
+    'Something I collected as a kid', 'My first car, or the car I wish I had', 'A hobby nobody here would guess',
+    'The last thing that made me laugh out loud', 'My comfort meal after a long week', 'A famous person I once met or saw',
+    'The worst haircut I ever had', 'My favorite board or card game', 'An app I open far too often',
+    'The most unusual place I have slept', 'A small thing that makes my day', 'My perfect weekend, in one line',
+    'The pet I had, or the one I want', 'A song stuck in my head this week', 'Something on my bucket list',
+  ],
+  prompt: [
+    'A terrible name for a boat', 'Invent a new office holiday', 'The worst thing to say in a job interview',
+    'A new chip flavor nobody asked for', 'What the office plant thinks about all day', 'A rejected name for a meeting room',
+    'The worst superpower to have', 'A slogan for Mondays', 'Something you should never put in the shared fridge',
+    'A bad idea for a theme park ride', 'The title of your autobiography', 'A useless invention that would still sell',
+    'The worst excuse for being late to a call', 'A reality show that should exist', 'What your pet would say about you',
+    'A new rule for every meeting', 'The worst thing to hear from a pilot', 'A fortune cookie with bad news',
+    'A sequel nobody needs', 'The most boring museum in the world', 'A team name for this group',
+    'An emoji that should exist', 'What aliens would find strangest about us', 'The worst flavor of ice cream',
+  ],
+};
+/* One line of free text, made safe to compare and to show: control
+   characters out, runs of space folded, trimmed, capped. */
+function cleanIceText(raw, max) {
+  return String(raw == null ? '' : raw).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+/* What a write-step answer must be for the mode, cleaned, or null. Two
+   truths travel as [lie, truth, truth] — the LIE FIRST is the whole
+   encoding, and the host shuffles the three before anybody sees them. */
+function iceSubmission(mode, v) {
+  if (mode === 'twoTruths') {
+    if (!Array.isArray(v) || v.length !== 3) return null;
+    const s = v.map((x) => cleanIceText(x, A_MAX));
+    return s.every(Boolean) ? s : null;
+  }
+  const t = typeof v === 'string' ? cleanIceText(v, ICE_TEXT_MAX) : '';
+  return t || null;
+}
+function normalizeIceCards(mode, raw) {
+  /* Positions are kept — an empty card stays an empty card — because the
+     key names authors BY POSITION, and a dropped card would shift every
+     author after it onto the wrong text. */
+  return (Array.isArray(raw) ? raw : []).slice(0, PLAYERS_MAX).map((c) => {
+    const o = c && typeof c === 'object' ? c : {};
+    if (mode === 'twoTruths') {
+      const u = String(o.u == null ? '' : o.u);
+      const s = (Array.isArray(o.s) ? o.s : []).slice(0, 3).map((x) => cleanIceText(x, A_MAX));
+      while (s.length < 3) s.push('');
+      return { u: ID_RE.test(u) ? u : '', s: s };
+    }
+    return { t: cleanIceText(o.t, ICE_TEXT_MAX) };
+  });
+}
+/* The `live/key` document: { key: { n: nonce, a: [author per card], l: [lie
+   per card] } }. All or nothing — a map with one bad uid in it would pin the
+   wrong author on every card after it, so it is refused whole. */
+function normalizeKey(raw) {
+  const k = raw && typeof raw === 'object' ? raw.key : null;
+  if (!k || typeof k !== 'object') return null;
+  const n = /^[0-9a-f]{16}$/.test(String(k.n)) ? String(k.n) : '';
+  if (!n || !Array.isArray(k.a)) return null;
+  const a = k.a.slice(0, PLAYERS_MAX).map((u) => String(u == null ? '' : u));
+  if (!a.every((u) => ID_RE.test(u))) return null;
+  const l = (Array.isArray(k.l) ? k.l : []).slice(0, PLAYERS_MAX).map((x) => int(x, 0, 2, 0));
+  return { n: n, a: a, l: l };
+}
+function randomHex(bytes) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes))).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function icePromptText(g) {
+  if (g.mode === 'twoTruths') return 'Two truths and a lie about you';
+  const list = ICE_PROMPTS[g.mode] || [];
+  return list[g.prompts[g.pi]] || 'A prompt this copy of the app does not have';
+}
+/* A guess for the step: an author's uid (who said it), a statement 0–2
+   (the lie) or a card (the vote), or nothing. */
+function icePickValid(g, v) {
+  if (g.step === 'guess') return typeof v === 'string' && g.authors.indexOf(v) !== -1;
+  if (g.step === 'lie') return Number.isInteger(v) && v >= 0 && v <= 2;
+  if (g.step === 'vote') return Number.isInteger(v) && v >= 0 && v < g.cards.length;
+  return false;
+}
+
+GAMES.ice = {
+  id: 'ice', name: 'Icebreakers', min: 2, max: PLAYERS_MAX,
+  normalize(g, base) {
+    const mode = ICE_MODES.indexOf(g.mode) === -1 ? 'whoSaid' : g.mode;
+    const author = String(g.author == null ? '' : g.author);
+    const picks = {};
+    if (g.picks && typeof g.picks === 'object')
+      Object.keys(g.picks).filter((k) => ID_RE.test(k) && ID_RE.test(String(g.picks[k]))).slice(0, PLAYERS_MAX)
+        .forEach((k) => { picks[k] = String(g.picks[k]); });
+    return Object.assign(base, {
+      mode: mode,
+      prompts: (Array.isArray(g.prompts) ? g.prompts : []).slice(0, ICE_PROMPTS_MAX).map((n) => int(n, 0, 999, 0)),
+      pi: int(g.pi, 0, ICE_PROMPTS_MAX - 1, 0),
+      n: int(g.n, 1, ICE_PROMPTS_MAX, 1),
+      cards: normalizeIceCards(mode, g.cards),
+      ci: int(g.ci, 0, PLAYERS_MAX - 1, 0),
+      authors: uidList(g.authors),
+      spies: uidList(g.spies).slice(0, 2),
+      nonce: /^[0-9a-f]{16}$/.test(String(g.nonce)) ? String(g.nonce) : '',
+      author: ID_RE.test(author) ? author : '',
+      lie: g.lie == null ? null : int(g.lie, 0, 2, 0),
+      byCard: (Array.isArray(g.byCard) ? g.byCard : []).slice(0, PLAYERS_MAX).map((u) => (ID_RE.test(String(u)) ? String(u) : '')),
+      counts: Array.isArray(g.counts) ? g.counts.slice(0, PLAYERS_MAX).map((n) => int(n, 0, PLAYERS_MAX, 0)) : null,
+      picks: picks,
+      gained: g.gained == null ? null : uidMap(g.gained, 1e5),
+    });
+  },
+  options(pk) {
+    const mode = ICE_MODES.indexOf(pk.mode) === -1 ? 'whoSaid' : pk.mode;
+    const blurb = {
+      whoSaid: 'Everyone finishes a sentence about themselves; then, one answer at a time, the room guesses who wrote it.',
+      twoTruths: 'Everyone writes two truths and a lie; then, one player at a time, the room picks the lie.',
+      prompt: 'Everyone answers a silly prompt; then all the answers go up, unsigned, and everybody votes for a favorite.',
+    }[mode];
+    return '<div class="field"><label for="pickMode">Kind</label><select id="pickMode">'
+      + ICE_MODES.map((m) => '<option value="' + m + '"' + (m === mode ? ' selected' : '') + '>' + esc(ICE_MODE_NAMES[m]) + '</option>').join('')
+      + '</select></div>'
+      + (mode === 'twoTruths' ? ''
+        : '<div class="field"><label for="pickPrompts">Prompts</label><select id="pickPrompts">'
+          + ['1', '2', '3'].map((v) => '<option value="' + v + '"' + (v === pk.prompts ? ' selected' : '') + '>' + v + '</option>').join('')
+          + '</select></div>')
+      + '<p class="hint cost-line">' + esc(blurb) + '</p>';
+  },
+  setup(pk, list, loc, t, host) {
+    const at = t == null ? now() : t;
+    const who = host == null ? me : host;
+    const mode = ICE_MODES.indexOf(pk.mode) === -1 ? 'whoSaid' : pk.mode;
+    const need = mode === 'whoSaid' ? 3 : 2;
+    if (list.filter((p) => isOnline(p, at)).length < need)
+      return { error: ICE_MODE_NAMES[mode] + ' needs ' + (need === 3 ? 'three' : 'two') + ' people online.' };
+    const n = mode === 'twoTruths' ? 1 : int(pk.prompts, 1, ICE_PROMPTS_MAX, 2);
+    const prompts = mode === 'twoTruths' ? [] : shuffled(ICE_PROMPTS[mode].length).slice(0, n);
+    return {
+      game: Object.assign(GAMES.ice.blank(), { step: 'write', stepAt: 'now', stepMs: mode === 'twoTruths' ? ICE_TRUTHS_WRITE_MS : ICE_WRITE_MS,
+              round: 1, mode: mode, prompts: prompts, pi: 0, n: n, spies: ID_RE.test(String(who || '')) ? [who] : [] }),
+      pack: null,
+    };
+  },
+  /* The fields a deal fills and a new prompt empties, in one place. */
+  blank() {
+    return { cards: [], ci: 0, authors: [], nonce: '', author: '', lie: null, byCard: [], counts: null, picks: {}, gained: null };
+  },
+  /* THE engine. Returns the patch the host should push, or null; a patch
+     carrying `_key` has the key written before the room. */
+  step(r, ctx) {
+    const g = r.game, t = ctx.now;
+    if (r.phase !== 'play' || r.kind !== 'ice' || !(g.stepAt > 0)) return null;
+    /* A host who took the seat mid-game names itself as the key's reader
+       before anything else: until it does, the rules refuse it the map. */
+    if (ctx.me && g.spies.indexOf(ctx.me) === -1) return { game: Object.assign({}, g, { spies: [ctx.me] }) };
+    const timeUp = t >= g.stepAt + g.stepMs;
+    const online = ctx.players.filter((p) => isOnline(p, t));
+    const live = ctx.answers.filter((a) => a.r === g.round);
+    if (g.step === 'write') {
+      const everyone = online.length > 0 && online.every((p) => live.some((a) => a.uid === p.uid && iceSubmission(g.mode, a.v)));
+      return everyone || timeUp ? GAMES.ice.deal(r, ctx, live) : null;
+    }
+    if (g.step === 'reveal') return timeUp ? GAMES.ice.after(r, ctx) : null;
+    const key = ctx.key && ctx.key.n === g.nonce && ctx.key.a.length === g.cards.length ? ctx.key : null;
+    if (!key) return t >= g.stepAt + g.stepMs + ICE_KEY_WAIT_MS ? GAMES.ice.nextPrompt(r, ctx, 'lost the answers — moving on') : null;
+    /* A pick on your own card is not a pick at all. */
+    const valid = live.filter((a) => icePickValid(g, a.v)
+      && (g.step === 'vote' ? key.a[a.v] !== a.uid : key.a[g.ci] !== a.uid));
+    const voters = g.step === 'vote' ? online : online.filter((p) => p.uid !== key.a[g.ci]);
+    const everyone = voters.length > 0 && voters.every((p) => valid.some((a) => a.uid === p.uid));
+    return everyone || timeUp ? GAMES.ice.reveal(r, key, valid) : null;
+  },
+  /* The answers become cards: shuffled, unsigned, and the map to `_key`. */
+  deal(r, ctx, live) {
+    const g = r.game;
+    const subs = live.map((a) => ({ uid: a.uid, v: iceSubmission(g.mode, a.v) })).filter((s) => s.v).slice(0, PLAYERS_MAX);
+    if (subs.length < 2) return GAMES.ice.nextPrompt(r, ctx, 'skipped: fewer than two answers');
+    const order = shuffled(subs.length).map((i) => subs[i]);
+    const lies = [];
+    const cards = order.map((s) => {
+      if (g.mode !== 'twoTruths') return { t: s.v };
+      const perm = shuffled(3);
+      lies.push(perm.indexOf(0));
+      return { u: s.uid, s: perm.map((i) => s.v[i]) };
+    });
+    /* The candidates for "who said it" in ARRIVAL order — never card order,
+       which would give the game away. */
+    const ids = subs.map((s) => s.uid);
+    const authors = ctx.players.map((p) => p.uid).filter((u) => ids.indexOf(u) !== -1)
+      .concat(ids.filter((u) => !ctx.players.some((p) => p.uid === u)));
+    const nonce = randomHex(8);
+    const step = { whoSaid: 'guess', twoTruths: 'lie', prompt: 'vote' }[g.mode];
+    return {
+      _key: { n: nonce, a: order.map((s) => s.uid), l: lies },
+      feed: [],
+      game: Object.assign({}, g, GAMES.ice.blank(), { step: step, stepAt: 'now',
+        stepMs: step === 'vote' ? ICE_VOTE_MS : step === 'lie' ? ICE_LIE_MS : ICE_GUESS_MS,
+        round: g.round + 1, cards: cards, authors: g.mode === 'whoSaid' ? authors : [], nonce: nonce }),
+    };
+  },
+  reveal(r, key, valid) {
+    const g = r.game;
+    const scores = Object.assign({}, r.scores), gained = {};
+    const add = (u, pts) => { if (!pts) return; gained[u] = (gained[u] || 0) + pts; scores[u] = (scores[u] || 0) + pts; };
+    const out = { stepAt: 'now', stepMs: ICE_REVEAL_MS, step: 'reveal' };
+    if (g.mode === 'prompt') {
+      const counts = g.cards.map(() => 0);
+      valid.forEach((a) => { counts[a.v] += 1; });
+      counts.forEach((c, i) => add(key.a[i], c * ICE_VOTE_PTS));
+      Object.assign(out, { stepMs: ICE_VOTE_REVEAL_MS, counts: counts, byCard: key.a.slice() });
+    } else {
+      const author = key.a[g.ci];
+      const right = g.mode === 'whoSaid' ? author : key.l[g.ci];
+      let fooled = 0;
+      valid.forEach((a) => { if (a.v === right) add(a.uid, ICE_GUESS_PTS); else fooled += 1; });
+      add(author, fooled * ICE_FOOL_PTS);
+      if (g.mode === 'whoSaid') {
+        const picks = {};
+        valid.forEach((a) => { picks[a.uid] = a.v; });
+        Object.assign(out, { author: author, picks: picks });
+      } else {
+        const counts = [0, 0, 0];
+        valid.forEach((a) => { counts[a.v] += 1; });
+        Object.assign(out, { author: author, lie: right, counts: counts });
+      }
+    }
+    out.gained = gained;
+    return { scores: scores, game: Object.assign({}, g, out) };
+  },
+  /* After a reveal: the next card, else the next prompt, else results. */
+  after(r, ctx) {
+    const g = r.game;
+    if (g.mode !== 'prompt' && g.ci + 1 < g.cards.length) {
+      return { game: Object.assign({}, g, { step: g.mode === 'whoSaid' ? 'guess' : 'lie', stepAt: 'now',
+        stepMs: g.mode === 'whoSaid' ? ICE_GUESS_MS : ICE_LIE_MS, round: g.round + 1, ci: g.ci + 1,
+        author: '', lie: null, counts: null, picks: {}, gained: null }) };
+    }
+    return GAMES.ice.nextPrompt(r, ctx, '');
+  },
+  /* A new prompt clears the cards, and results clear them AND the key: the
+     text people wrote leaves the cloud with the prompt it answered. */
+  nextPrompt(r, ctx, note) {
+    const g = r.game;
+    const feed = note ? r.feed.concat([{ t: 'info', uid: r.host, text: note }]).slice(-FEED_MAX) : r.feed;
+    if (g.pi + 1 < g.n) {
+      return { feed: feed, game: Object.assign({}, g, GAMES.ice.blank(), { step: 'write', stepAt: 'now', stepMs: ICE_WRITE_MS,
+        round: g.round + 1, pi: g.pi + 1 }) };
+    }
+    return { phase: 'results', feed: feed, _key: { n: '', a: [], l: [] },
+             game: Object.assign({}, g, GAMES.ice.blank(), { step: 'results', stepAt: 'now', stepMs: 0 }) };
+  },
+  encode(input, mode) { return iceSubmission(mode || 'whoSaid', input); },
+
+  /* ── What a player sees ────────────────────────────────────────────────
+     Like the drawing card, the stage REFRESHES IN PLACE between steps: the
+     two-truths form is three boxes, and a wholesale redraw on every roster
+     snapshot would keep only the focused one (keepTyping) and empty the
+     other two. Keyed on mode, step, round, who is looking and "have I
+     answered" — anything that changes what the body says. */
+  key(r, who) {
+    const g = r.game;
+    return [g.mode, g.step, g.round, who, iceAnswered(r, who) ? 'sent' : ''].join(':');
+  },
+  meter(r, who, list, t) {
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    const online = list.filter((p) => isOnline(p, t));
+    const done = online.filter((p) => p.ansR === g.round).length;
+    const cd = '<span class="countdown' + (g.step !== 'reveal' && left < 5000 ? ' low' : '') + '" id="qLeft">' + fmtSecs(left) + '</span>';
+    if (g.step === 'reveal') return (g.mode !== 'prompt' && g.ci + 1 < g.cards.length ? 'Next one in ' : g.pi + 1 < g.n ? 'Next prompt in ' : 'Results in ') + cd;
+    const verb = g.step === 'write' ? 'written' : g.step === 'vote' ? 'voted' : 'guessed';
+    /* The author of the card on screen does not guess. Two truths names
+       them; who-said-it cannot, so it counts one fewer than are here. */
+    const card = g.cards[g.ci];
+    const of = g.step === 'lie' && card ? online.filter((p) => p.uid !== card.u).length
+      : g.step === 'guess' ? Math.max(0, online.length - 1) : online.length;
+    return cd + ' seconds · ' + done + ' of ' + of + ' ' + verb;
+  },
+  view(r, who, list, ans, t) {
+    const g = r.game;
+    const head = g.mode === 'twoTruths' ? ICE_MODE_NAMES.twoTruths
+      : ICE_MODE_NAMES[g.mode] + '<span class="spacer"></span><span class="pill">Prompt ' + (g.pi + 1) + ' of ' + g.n + '</span>';
+    const sub = g.mode !== 'prompt' && g.cards.length && g.step !== 'write'
+      ? '<p class="hint" style="margin:0 0 var(--sp-4)">' + (g.mode === 'whoSaid' ? 'Answer ' : 'Player ') + (g.ci + 1) + ' of ' + g.cards.length + '</p>' : '';
+    const notes = r.feed.filter((f) => f.t === 'info').map((f) => '<p class="hint" style="margin:0 0 var(--sp-4)">' + esc(f.text) + '</p>').join('');
+    return '<div class="card" id="iceStage" data-key="' + esc(GAMES.ice.key(r, who)) + '">'
+      + '<h2>' + head + '</h2>'
+      + '<div class="meter"><span data-part="meter">' + GAMES.ice.meter(r, who, list, t) + '</span></div>'
+      + notes + sub + GAMES.ice.body(r, who) + '</div>';
+  },
+  body(r, who) {
+    const g = r.game;
+    const sent = iceAnswered(r, who);
+    const prompt = '<p class="qtext">' + esc(icePromptText(g)) + '</p>';
+    if (g.step === 'write') {
+      if (sent) {
+        const mine = myIce.write && myIce.write.pi === g.pi ? myIce.write.v : null;
+        const shown = Array.isArray(mine) ? '<ul class="ice-mine"><li><strong>Lie:</strong> ' + esc(mine[0]) + '</li><li>' + esc(mine[1]) + '</li><li>' + esc(mine[2]) + '</li></ul>'
+          : mine ? '<blockquote class="ice-quote">' + esc(mine) + '</blockquote>' : '';
+        return prompt + '<p class="lede">Sent — waiting for the others.</p>' + shown;
+      }
+      if (g.mode === 'twoTruths') {
+        return prompt + '<p class="hint">The three are shuffled before anyone sees them — nobody will know which box was which.</p>'
+          + '<div class="field"><label for="iceLie">The lie</label><input type="text" id="iceLie" maxlength="' + A_MAX + '" autocomplete="off"></div>'
+          + '<div class="field"><label for="iceT1">A truth</label><input type="text" id="iceT1" maxlength="' + A_MAX + '" autocomplete="off"></div>'
+          + '<div class="field"><label for="iceT2">Another truth</label><input type="text" id="iceT2" maxlength="' + A_MAX + '" autocomplete="off"></div>'
+          + '<div class="row-actions" style="justify-content:flex-start"><button type="button" class="primary" id="iceSendBtn">Send</button></div>';
+      }
+      return prompt + '<p class="hint">' + (g.mode === 'whoSaid' ? 'Finish it about yourself. Answers go up unsigned, and the room guesses who wrote each one.'
+          : 'Make the room laugh. Answers go up unsigned, and everybody votes for a favorite.') + '</p>'
+        + '<div class="guessrow"><label class="sr-only" for="iceText">Your answer</label>'
+        + '<input type="text" id="iceText" maxlength="' + ICE_TEXT_MAX + '" autocomplete="off" placeholder="Type your answer and press Enter">'
+        + '<button type="button" class="primary" id="iceSendBtn">Send</button></div>';
+    }
+    const card = g.cards[g.ci] || { t: '', u: '', s: ['', '', ''] };
+    const reveal = g.step === 'reveal';
+    const gains = reveal ? iceGains(g, who) : '';
+    if (g.mode === 'whoSaid') {
+      const quote = '<blockquote class="ice-quote">' + esc(card.t || '…') + '</blockquote>';
+      if (reveal) {
+        const rows = Object.keys(g.picks).map((u) => '<li>' + esc(nickOf(u)) + (u === who ? ' <span class="you">(you)</span>' : '')
+          + ' guessed ' + esc(nickOf(g.picks[u])) + ' — <strong>' + (g.picks[u] === g.author ? 'right' : 'wrong') + '</strong></li>').join('');
+        return prompt + quote + '<p class="word-line">Written by <strong>' + esc(nickOf(g.author)) + '</strong>'
+          + (g.author === who ? ' <span class="you">(you)</span>' : '') + '</p>'
+          + (rows ? '<ul class="ice-picks">' + rows + '</ul>' : '<p class="hint">Nobody guessed.</p>') + gains;
+      }
+      if (iceIsMine(g, who, card)) return prompt + quote + '<p class="lede">This one is yours — keep a straight face.</p>';
+      const picked = myIce.round === g.round ? myIce.v : null;
+      return prompt + quote + '<p class="hint">Who wrote it?</p><div class="answers">'
+        + g.authors.filter((u) => u !== who).map((u) => {
+            const p = players.find((x) => x.uid === u) || { nick: 'Someone', hue: 0 };
+            return '<button type="button" data-ice-pick="' + esc(u) + '" class="' + (picked === u ? 'mine' : '') + '"' + (sent ? ' disabled' : '')
+              + ' aria-label="' + esc(p.nick + (picked === u ? ', your guess' : '')) + '"><span class="ice-who">' + avatarHtml(p) + esc(p.nick) + '</span>'
+              + (picked === u ? '<span class="tag">your guess</span>' : '') + '</button>';
+          }).join('') + '</div>';
+    }
+    if (g.mode === 'twoTruths') {
+      const mine = card.u === who;
+      const title = '<p class="qtext">' + (mine ? 'Your two truths and a lie' : esc(nickOf(card.u)) + '’s two truths and a lie') + '</p>';
+      const picked = myIce.round === g.round ? myIce.v : null;
+      const list = '<div class="answers' + (reveal ? ' revealed' : '') + '">' + card.s.map((s, i) => {
+        let cls = '', tag = '';
+        if (reveal) {
+          if (i === g.lie) { cls = 'right'; tag = 'the lie'; }
+          else if (picked === i) tag = 'your pick';
+          if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' pick' : ' picks');
+        } else if (picked === i) { cls = 'mine'; tag = 'your pick'; }
+        return '<button type="button" data-ice-pick="' + i + '" class="' + cls + '"' + (reveal || sent || mine ? ' disabled' : '')
+          + ' aria-label="' + esc(s + (tag ? ', ' + tag : '')) + '"><span>' + esc(s) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+      }).join('') + '</div>';
+      return title + (mine && !reveal ? '<p class="hint">These are yours — watch them squirm.</p>' : !reveal ? '<p class="hint">Which one is the lie?</p>' : '') + list + gains;
+    }
+    /* Best answer: every card at once. */
+    const picked = myIce.round === g.round ? myIce.v : null;
+    const order = g.cards.map((c, i) => i);
+    if (reveal && g.counts) order.sort((a, b) => g.counts[b] - g.counts[a] || a - b);
+    const top = reveal && g.counts ? Math.max.apply(null, g.counts) : 0;
+    return prompt + (reveal ? '' : '<p class="hint">Vote for a favorite — not your own.</p>') + '<div class="answers ice-cards' + (reveal ? ' revealed' : '') + '">'
+      + order.map((i) => {
+          const c = g.cards[i];
+          const own = !reveal && iceIsMine(g, who, c);
+          let cls = '', tag = '';
+          if (reveal) {
+            const n = g.counts ? g.counts[i] : 0;
+            if (n && n === top) cls = 'right';
+            tag = nickOf(g.byCard[i]) + (g.byCard[i] === who ? ' (you)' : '') + ' · ' + n + (n === 1 ? ' vote' : ' votes') + (n && n === top ? ' · top' : '');
+          } else if (own) tag = 'yours';
+          else if (picked === i) { cls = 'mine'; tag = 'your vote'; }
+          return '<button type="button" data-ice-pick="' + i + '" class="' + cls + '"' + (reveal || sent || own ? ' disabled' : '')
+            + ' aria-label="' + esc(c.t + (tag ? ', ' + tag : '')) + '"><span>' + esc(c.t) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+        }).join('') + '</div>' + gains;
+  },
+  refresh(r, who, list, t) {
+    const stage = $('iceStage');
+    if (!stage || stage.getAttribute('data-key') !== GAMES.ice.key(r, who)) return false;
+    const el = stage.querySelector('[data-part="meter"]');
+    const html = GAMES.ice.meter(r, who, list, t);
+    if (el && el.innerHTML !== html) el.innerHTML = html;
+    return true;
+  },
+  tick(r, t) {
+    const el = $('qLeft');
+    if (!el) return;
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    el.textContent = fmtSecs(left);
+    el.classList.toggle('low', g.step !== 'reveal' && left < 5000);
+  },
+  onClick(btn, r, who) {
+    if (btn.id === 'iceSendBtn') { sendIceWrite(r); return; }
+    const v = btn.getAttribute('data-ice-pick');
+    if (v === null || btn.disabled) return;
+    const g = r.game;
+    if (['guess', 'lie', 'vote'].indexOf(g.step) === -1 || iceAnswered(r, who)) return;
+    const val = g.step === 'guess' ? v : Number(v);
+    if (!icePickValid(g, val)) return;
+    myIce.round = g.round; myIce.v = val;
+    noteWrite();
+    transport().answer(g.round, val).catch((e) => { console.warn('ice pick', e); myIce.round = 0; myIce.v = null; toast(describeCloudError(e)); render(); });
+    render();
+  },
+  results(r) {
+    const g = r.game;
+    return '<p class="lede">' + esc(ICE_MODE_NAMES[g.mode]) + (g.mode === 'twoTruths' ? '' : ' — ' + g.n + (g.n === 1 ? ' prompt' : ' prompts'))
+      + '. What everyone wrote has been cleared from the room. Points carry on to the next game — the scoreboard below is the night so far.</p>';
+  },
+};
+/* This browser's own part in an icebreaker, in memory only: what it wrote
+   for the current prompt (so it can see its own card), and its pick for the
+   current round. Reset when the game ends (onRoom). */
+let myIce = { round: 0, v: null, write: null };
+function iceAnswered(r, who) {
+  const g = r.game;
+  const mine = players.find((p) => p.uid === who);
+  return myIce.round === g.round || !!(mine && mine.ansR === g.round);
+}
+function iceIsMine(g, who, card) {
+  if (g.mode === 'twoTruths') return card.u === who;
+  const w = myIce.write;
+  return !!(w && w.pi === g.pi && typeof w.v === 'string' && w.v === card.t);
+}
+function iceGains(g, who) {
+  const gained = g.gained || {};
+  const rows = Object.keys(gained).sort((a, b) => gained[b] - gained[a])
+    .map((u) => '<li><span class="gain">+' + gained[u] + '</span> ' + esc(nickOf(u)) + (u === who ? ' <span class="you">(you)</span>' : '') + '</li>').join('');
+  return rows ? '<ul class="gains">' + rows + '</ul>' : '<p class="hint">No points this time.</p>';
+}
+function sendIceWrite(r) {
+  const g = r.game;
+  if (g.step !== 'write' || iceAnswered(r, me)) return;
+  const raw = g.mode === 'twoTruths' ? ['iceLie', 'iceT1', 'iceT2'].map((id) => ($(id) ? $(id).value : '')) : ($('iceText') ? $('iceText').value : '');
+  const v = iceSubmission(g.mode, raw);
+  if (!v) { toast(g.mode === 'twoTruths' ? 'Fill in all three' : 'Write something first'); return; }
+  myIce = { round: g.round, v: v, write: { pi: g.pi, v: v } };
+  noteWrite();
+  transport().answer(g.round, v).catch((e) => { console.warn('ice write', e); myIce = { round: 0, v: null, write: null }; toast(describeCloudError(e)); render(); });
+  render();
+}
+
 
 /* ═══════════════════════════════ Rendering ═══════════════════════════════ */
 
@@ -2958,15 +3462,18 @@ function renderScores(title) {
 /* The host's choices while the lobby is up, read back before every redraw so
    a snapshot arriving mid-choice does not reset the picker. View state, never
    saved: the choices are copied onto the room document when the game starts. */
-let pick = { kind: 'trivia', pack: '', n: '20', secs: '20', rounds: '1', dsecs: '75' };
+let pick = { kind: 'trivia', pack: '', n: '20', secs: '20', rounds: '1', dsecs: '75', mode: 'whoSaid', prompts: '2' };
 function pickState() {
   const k = $('pickKind'), p = $('pickPack'), n = $('pickN'), s = $('pickSecs'), rd = $('pickRounds'), ds = $('pickDSecs');
+  const md = $('pickMode'), pr = $('pickPrompts');
   if (k) pick.kind = k.value;
   if (p) pick.pack = p.value;
   if (n) pick.n = n.value;
   if (s) pick.secs = s.value;
   if (rd) pick.rounds = rd.value;
   if (ds) pick.dsecs = ds.value;
+  if (md) pick.mode = md.value;
+  if (pr) pick.prompts = pr.value;
 }
 
 function renderLobby() {
@@ -3077,6 +3584,9 @@ function transport() { return demoOn ? demoSim : window.brCloud; }
 
 let heartbeatTimer = null, tickTimer = null, lastWriteAt = 0, claimAskedAt = 0;
 let pushInFlight = false, pendingRev = 0, pendingSince = 0;
+/* The icebreakers' author map, as this browser last read or wrote it —
+   only ever the host's (the rules let nobody else read it). Memory only. */
+let iceKey = null;
 
 function noteWrite() { lastWriteAt = Date.now(); }
 
@@ -3126,6 +3636,7 @@ async function leaveRoom(reason) {
   t.stop();
   const wasDemo = demoOn;
   room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
+  iceKey = null; myIce = { round: 0, v: null, write: null };
   if (wasDemo) {
     const id = window.brCloud && window.brCloud.uid ? window.brCloud.uid() : null;
     me = ID_RE.test(String(id || '')) ? String(id) : null;
@@ -3163,15 +3674,23 @@ function hostTick() {
   if (room.phase !== 'play') return;
   const g = GAMES[room.kind];
   if (!g) return;
-  const patch = g.step(room, { answers: answers, players: players, now: t });
+  const patch = g.step(room, { answers: answers, players: players, now: t, me: me, key: iceKey });
   if (patch) pushPatch(patch);
 }
 
+/* A patch carrying `_key` (the icebreakers' author map) has the key written
+   FIRST and the room second: a player must never see cards whose key the
+   host has not yet got, or a handed-off host could inherit cards with no
+   map. The key is adopted here at once — a listener skips its own echo. */
 function pushPatch(patch) {
   if (pushInFlight) return Promise.resolve(false);
   pushInFlight = true;
   noteWrite();
-  return transport().push(patch).then((rev) => {
+  const body = Object.assign({}, patch);
+  const k = body._key;
+  delete body._key;
+  const first = k ? transport().writeKey(k).then(() => { iceKey = normalizeKey({ key: k }); }) : Promise.resolve();
+  return first.then(() => transport().push(body)).then((rev) => {
     pendingRev = rev; pendingSince = Date.now();
     return true;
   }).catch((e) => {
@@ -3210,7 +3729,7 @@ window.brApp = {
     if (next.expiresAt <= now()) { leaveRoom('That room has ended'); return; }
     /* A new game starts its rounds from 1 again, so an answer remembered from
        the last game must not read as this game's. */
-    if (next.phase !== 'play' || !room || room.kind !== next.kind) myPick = { round: 0, v: null };
+    if (next.phase !== 'play' || !room || room.kind !== next.kind) { myPick = { round: 0, v: null }; myIce = { round: 0, v: null, write: null }; }
     /* The game is over and this browser drew the last picture: wipe it, so a
        drawing does not sit in the cloud after the game it belonged to. The
        room still names this browser as the drawer at results, which is what
@@ -3226,6 +3745,7 @@ window.brApp = {
   onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); },
   onAnswers: (list) => { answers = normalizeAnswers(list); hostTick(); },
   onStrokes: (raw) => { strokesDoc = normalizeStrokes(raw); padAdopt(); },
+  onKey: (raw) => { iceKey = normalizeKey(raw); hostTick(); },
   onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
   onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
   noteWrite: noteWrite,
@@ -3322,6 +3842,19 @@ const DEMO_PLAYERS = [
   { uid: 'demoTomSteppedAway00000000', nick: 'Tom (stepped away)', hue: 4, awayMs: 10 * 60000 },
 ];
 const DEMO_ME = 'demoYouTheHost000000000000';
+/* What the invented players write in an icebreaker: lines that read as
+   an answer to almost any prompt, and one honest-sounding set of two truths
+   and a lie each — the LIE FIRST, the way a real answer travels. */
+const DEMO_ICE_LINES = [
+  'Honestly? Cheese.', 'A very small accordion', 'Something involving a llama', 'My grandmother’s secret recipe',
+  'Three cats in a trench coat', 'Karaoke at two in the morning', 'The 1998 edition, obviously', 'Pancakes, every single time',
+  'A rubber duck named Gerald', 'Nothing I can say on a work call', 'A canoe with no paddle', 'Whatever is on sale',
+];
+const DEMO_TRUTHS = [
+  ['I once met an astronaut at a bus stop', 'I can juggle four balls', 'I won a pie-eating contest'],
+  ['I have run a marathon backwards', 'I grew up on a farm', 'I speak three languages'],
+  ['I have never seen snow', 'I collect vinyl records', 'I was a lifeguard one summer'],
+];
 /* The demo's doodles: what an invented drawer can draw, as strokes on the
    0–1000 grid. A circle is squashed by 3/4 across so it comes out round on
    the 4:3 canvas. Every word here is in DRAW_WORDS. */
@@ -3368,7 +3901,7 @@ function doodleSegs(word) {
   return out;
 }
 const demoSim = (() => {
-  let simRoom = null, simPlayers = {}, simAnswers = {}, simStrokes = { seq: 0, segs: [] }, code = '', timers = [], lastKey = '';
+  let simRoom = null, simPlayers = {}, simAnswers = {}, simStrokes = { seq: 0, segs: [] }, simKey = null, code = '', timers = [], lastKey = '';
   const emit = () => setTimeout(() => {
     if (!simRoom) { window.brApp.onRoom(null); return; }
     window.brApp.onRoom(JSON.parse(JSON.stringify(simRoom)));
@@ -3414,6 +3947,38 @@ const demoSim = (() => {
       if (word && (kind !== 'slow' || Math.random() < 0.6)) later(rightAt + Math.random() * 4000, () => say(p.uid, r, encodeGuess(2, word)));
     });
   };
+  /* The invented players' icebreakers: they write a canned line (or three),
+     and guess, pick or vote at their own pace — "quick" peeks at the key
+     and is always right, which is the demo's privilege and nobody else's,
+     and nobody votes for or guesses on their own card. */
+  const demoIce = () => {
+    const g = normalizeRoom(simRoom).game;
+    const r = g.round;
+    const key = normalizeKey({ key: simKey });
+    const fresh = key && key.n === g.nonce;
+    DEMO_PLAYERS.filter((p) => !p.awayMs).forEach((p, i) => {
+      const at = 1500 + i * 1800 + Math.random() * 2500;
+      const quick = /quick/.test(p.nick);
+      if (g.step === 'write') {
+        const v = g.mode === 'twoTruths' ? DEMO_TRUTHS[i % DEMO_TRUTHS.length]
+          : DEMO_ICE_LINES[(r * 3 + i) % DEMO_ICE_LINES.length];
+        later(at + 2500, () => say(p.uid, r, v));
+      } else if (fresh && g.step === 'guess') {
+        const author = key.a[g.ci];
+        const others = g.authors.filter((u) => u !== p.uid);
+        if (author === p.uid || !others.length) return;
+        const v = quick ? author : others[Math.floor(Math.random() * others.length)];
+        later(at, () => say(p.uid, r, v));
+      } else if (fresh && g.step === 'lie') {
+        if (key.a[g.ci] === p.uid) return;
+        const v = quick ? key.l[g.ci] : Math.floor(Math.random() * 3);
+        later(at, () => say(p.uid, r, v));
+      } else if (fresh && g.step === 'vote') {
+        const opts = g.cards.map((c, k) => k).filter((k) => key.a[k] !== p.uid);
+        if (opts.length) later(at, () => say(p.uid, r, opts[Math.floor(Math.random() * opts.length)]));
+      }
+    });
+  };
   /* A patch from the host, applied the way the cloud's transaction would:
      `stepAt: 'now'` becomes the clock, `rev` goes up by one. */
   const applyPatch = (patch) => {
@@ -3440,7 +4005,7 @@ const demoSim = (() => {
     },
     join: async () => 'not-found',
     listen: () => emit(),
-    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; simStrokes = { seq: 0, segs: [] }; lastKey = ''; },
+    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; simStrokes = { seq: 0, segs: [] }; simKey = null; lastKey = ''; },
     push: async (patch) => {
       if (!simRoom) throw Object.assign(new Error('gone'), { code: 'br/gone' });
       const rev = applyPatch(patch);
@@ -3450,6 +4015,7 @@ const demoSim = (() => {
       const fresh = key !== lastKey;
       lastKey = key;
       if (fresh && simRoom.phase === 'play' && simRoom.kind === 'draw') { stopTimers(); demoDraw(); }
+      if (fresh && simRoom.phase === 'play' && simRoom.kind === 'ice') { stopTimers(); demoIce(); }
       /* The invented players answer a new question on their own, each at
          their own pace — which is what shows the speed bonus. */
       if (fresh && simRoom.phase === 'play' && simRoom.game.step === 'ask') {
@@ -3478,6 +4044,7 @@ const demoSim = (() => {
     },
     strokes: async (r, list) => { if (!simRoom) return; if (simStrokes.seq !== r) simStrokes = { seq: r, segs: [] }; simStrokes.segs = simStrokes.segs.concat(list).slice(0, SEGS_MAX); emit(); },
     clearStrokes: async (r) => { if (!simRoom) return; simStrokes = { seq: r, segs: [] }; emit(); },
+    writeKey: async (k) => { if (!simRoom) return; simKey = JSON.parse(JSON.stringify(k)); },
     heartbeat: async () => { if (simPlayers[DEMO_ME]) simPlayers[DEMO_ME].seenAt = Date.now(); emit(); },
     claimHost: async () => {},
     extend: async (ms) => { simRoom.expiresAt = ms; simRoom.rev += 1; emit(); return simRoom.rev; },
@@ -3829,17 +4396,24 @@ $('roomView').addEventListener('click', (e) => {
 /* The picker's options depend on the game, and the drawing estimate on the
    rounds and seconds — so a change there redraws the lobby. */
 $('roomView').addEventListener('change', (e) => {
-  if (room && room.phase === 'lobby' && /^pick(Kind|Rounds|DSecs)$/.test(e.target.id || '')) render();
+  if (room && room.phase === 'lobby' && /^pick(Kind|Rounds|DSecs|Mode)$/.test(e.target.id || '')) render();
 });
 $('roomView').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.id === 'guessBox' && room && room.kind === 'draw') { e.preventDefault(); sendGuess(room, me); }
+  /* The two-truths boxes walk down on Enter; the last one, or the single
+     box, sends. */
+  const next = { iceLie: 'iceT1', iceT1: 'iceT2' }[e.target.id];
+  if (e.key === 'Enter' && room && room.kind === 'ice' && (next || e.target.id === 'iceT2' || e.target.id === 'iceText')) {
+    e.preventDefault();
+    if (next && $(next)) $(next).focus(); else sendIceWrite(room);
+  }
 });
 
 function startGame() {
   pickState();
   const g = GAMES[pick.kind];
   if (!g || !iAmHost()) return;
-  const built = g.setup(pick, players, local);
+  const built = g.setup(pick, players, local, now(), me);
   if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
   pushPatch({ phase: 'play', kind: g.id, game: built.game, pack: built.pack || null, feed: [] });
 }
@@ -3892,6 +4466,7 @@ const HELP = {
     <p>The host’s dot matters most: if the host’s browser has been silent for <strong>three minutes</strong>, the player who has been in the room longest takes over running it, and the game carries on from where the room says it is.</p>`],
   scores: ['How Points Are Worked Out', `<p>A correct answer is worth <strong>100 points plus a speed bonus of up to 100</strong>: the bonus is the share of the question’s time that was still left when the answer arrived, so an answer at the halfway mark earns 150 in all. A wrong answer, or none, earns nothing and costs nothing.</p>
     <p><strong>Drawing &amp; Guess</strong> works the same way for a guesser — 100 for getting the word plus up to 100 for speed — and the <strong>drawer earns 50 for every player who gets it</strong>, so a clear drawing pays.</p>
+    <p><strong>Icebreakers</strong> have no speed bonus. Guessing who wrote an answer, or spotting the lie, is <strong>50 points</strong>, and the author earns <strong>25 for every player they fooled</strong>. In Best Answer, every vote your answer gets is <strong>100 points</strong>; nobody can vote for their own.</p>
     <p>Timing is measured by the <strong>server’s clock</strong> on both ends — when the question opened and when your answer landed — never by your own computer’s, so a slow laptop clock cannot help or hurt. Points <strong>carry across games</strong> for the whole night; someone who joins late starts on nought.</p>`],
 };
 const helpDialog = $('helpDialog');
@@ -4061,6 +4636,12 @@ window.__brTestHooks = {
   parseGuess: parseGuess, cleanGuess: cleanGuess, blanksFor: blanksFor, hintPositions: hintPositions,
   encodeSeg: encodeSeg, parseSeg: parseSeg, normalizeStrokes: normalizeStrokes, makeCoalescer: makeCoalescer, drawCost: drawCost,
   demoDoodle: demoDoodle, doodleSegs: doodleSegs, DEMO_DOODLES: DEMO_DOODLES,
+  ICE_MODES: ICE_MODES, ICE_PROMPTS: ICE_PROMPTS, ICE_TEXT_MAX: ICE_TEXT_MAX, ICE_GUESS_PTS: ICE_GUESS_PTS, ICE_FOOL_PTS: ICE_FOOL_PTS,
+  ICE_VOTE_PTS: ICE_VOTE_PTS, ICE_KEY_WAIT_MS: ICE_KEY_WAIT_MS, ICE_REVEAL_MS: ICE_REVEAL_MS,
+  cleanIceText: cleanIceText, iceSubmission: iceSubmission, normalizeKey: normalizeKey, normalizeIceCards: normalizeIceCards,
+  DEMO_ICE_LINES: DEMO_ICE_LINES, DEMO_TRUTHS: DEMO_TRUTHS,
+  __iceKey: () => iceKey, __setIceKey: (k) => { iceKey = k; }, __myIce: () => myIce, __setMyIce: (v) => { myIce = v; render(); },
+  pushPatch: pushPatch,
   __pad: () => pad, __strokesDoc: () => strokesDoc, __myDraw: () => myDraw, __setDraw: (w) => { myDraw = w; },
 };
 </script>
@@ -4115,6 +4696,7 @@ const cloudOn = typeof FIREBASE_CONFIG.apiKey === 'string' && FIREBASE_CONFIG.ap
 
 let A, F, auth, db, user = null;
 let unsubs = [], listening = null, answersUnsub = null, strokesUnsub = null, strokesFailedAt = 0, relistenTimer = null;
+let keyUnsub = null, keyFailedAt = 0;
 let roomExpiresMs = 0, roomHost = null;
 /* The clock offset: Date.now() when this browser last wrote a sentinel, and
    what the server resolved it to, read back from the players listener. */
@@ -4125,6 +4707,7 @@ const roomRef = (code) => F.doc(db, 'rooms', code);
 const playerRef = (code, uid) => F.doc(db, 'rooms', code, 'players', uid);
 const answerRef = (code, uid) => F.doc(db, 'rooms', code, 'answers', uid);
 const strokesRef = (code) => F.doc(db, 'rooms', code, 'live', 'strokes');
+const keyRef = (code) => F.doc(db, 'rooms', code, 'live', 'key');
 const ts = (ms) => F.Timestamp.fromMillis(ms);
 /* A snapshot's Timestamps become milliseconds here, so the boundary in the
    classic script deals in numbers — and still accepts a Timestamp shape,
@@ -4184,6 +4767,7 @@ function stopListening() {
   unsubs.forEach((u) => u()); unsubs = [];
   if (answersUnsub) { answersUnsub(); answersUnsub = null; }
   if (strokesUnsub) { strokesUnsub(); strokesUnsub = null; }
+  if (keyUnsub) { keyUnsub(); keyUnsub = null; }
   listening = null; roomHost = null;
   clearTimeout(relistenTimer); relistenTimer = null;
 }
@@ -4228,6 +4812,24 @@ function syncStrokesListener(code, r) {
     strokesUnsub(); strokesUnsub = null;
   }
 }
+/* The icebreakers' author map is readable only by the uids the room names
+   in `game.spies` — the host — so the listener follows that list: attached
+   while this browser is named there during an icebreaker, dropped (and the
+   app told) the moment it is not. No `hasPendingWrites` skip: the host's own
+   write never comes back as a fresh snapshot, and the app adopts it on
+   write anyway (pushPatch). A refused read waits thirty seconds. */
+function syncKeyListener(code, r) {
+  const spies = r && r.game && Array.isArray(r.game.spies) ? r.game.spies : [];
+  const want = !!user && r.kind === 'ice' && r.phase === 'play' && spies.indexOf(user.uid) !== -1;
+  if (want && !keyUnsub && Date.now() - keyFailedAt > 30000) {
+    keyUnsub = F.onSnapshot(keyRef(code), (s) => {
+      window.brApp.onKey(s.exists() ? plain(s.data()) : null);
+    }, (e) => { console.warn('key', e); keyFailedAt = Date.now(); if (keyUnsub) { keyUnsub(); keyUnsub = null; } });
+  } else if (!want && keyUnsub) {
+    keyUnsub(); keyUnsub = null;
+    window.brApp.onKey(null);
+  }
+}
 function listenTo(code) {
   if (!user || !F || !code) return;
   if (listening === code) return;
@@ -4241,6 +4843,7 @@ function listenTo(code) {
     roomHost = r.host;
     syncAnswersListener(code, r.host);
     syncStrokesListener(code, r);
+    syncKeyListener(code, r);
     window.brApp.onRoom(r);
   }, onListenError));
   unsubs.push(F.onSnapshot(F.collection(db, 'rooms', code, 'players'), (q) => {
@@ -4346,6 +4949,13 @@ async function clearStrokes(round) {
   needUser();
   await F.setDoc(strokesRef(listening), { seq: round, segs: [], at: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
 }
+/* The host's author map: a plain set, which is also how results empty it.
+   The rules let only the host write here, with no key but `key` and
+   `expiresAt`. */
+async function writeKey(k) {
+  needUser();
+  await F.setDoc(keyRef(listening), { key: k, expiresAt: ts(roomExpiresMs) });
+}
 async function heartbeat() {
   needUser();
   sentAt = Date.now();
@@ -4377,6 +4987,7 @@ async function leave(opts) {
      rules refuse this browser's read of the answers, and a listener still
      attached says so in the console. */
   if (o.handTo && answersUnsub) { answersUnsub(); answersUnsub = null; }
+  if (o.handTo && keyUnsub) { keyUnsub(); keyUnsub = null; }
   if (o.handTo) { try { await push({ host: o.handTo }); } catch (e) { console.warn('handoff on leave', e); } }
   try { await F.deleteDoc(answerRef(code, user.uid)); } catch (e) { /* there may be none */ }
   try { await F.deleteDoc(playerRef(code, user.uid)); } catch (e) { /* already gone */ }
@@ -4387,7 +4998,7 @@ window.brCloud = {
   on: cloudOn,
   uid: () => (user ? user.uid : null),
   create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
-  strokes: strokes, clearStrokes: clearStrokes,
+  strokes: strokes, clearStrokes: clearStrokes, writeKey: writeKey,
   claimHost: claimHost, extend: extend, leave: leave,
   listen: listenTo, stop: stopListening,
 };

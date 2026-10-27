@@ -86,6 +86,45 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
+**M4 — icebreakers (2026-10-27).** `GAMES.ice` — one game, three `game.mode`s: `whoSaid`
+(write → a 15 s `guess` per card → `reveal`), `twoTruths` (write three, lie first → a 20 s
+`lie` per player → `reveal`) and `prompt` (write → one 30 s `vote` over every card →
+`reveal`), 24 embedded prompts each for the two prompted modes, 50 / 25 / 100 points, no
+speed bonus. The author map (`{n: nonce, a: [author per card], l: [lie per card]}`) lives
+in **`live/key`**, readable only by `game.spies` = `[host]` — the rules had that clause
+from M0, so **no rules change**. `normalizeKey`, `normalizeIceCards`, `iceSubmission`, the
+module's `syncKeyListener` and `writeKey`, `brApp.onKey`, the demo's writers and voters.
+**SCHEMA 3.** Observed against the real cloud with three Playwright contexts: the key
+refused to both non-hosts (`permission-denied`), the host pressing Leave mid-guess, the
+new host naming itself in `spies` and finishing the prompt with every card credited to its
+true writer, the cards and the key emptied at results, zero console errors. `EXPECTED` 184.
+
+**Things a tidy-up would break (M4):**
+- **The key is written BEFORE the room**, from the patch's `_key` in `pushPatch`, and the
+  two share `game.nonce`. A step() that finds a key with another nonce (or none) WAITS —
+  for `ICE_KEY_WAIT_MS` past the step's time, then gives the prompt up with a feed line —
+  rather than scoring cards against last deal's map. `_key` must never reach `push()`.
+- **A host that is not in `game.spies` returns `{spies: [me]}` before anything else.**
+  The handoff clause in the rules lets a claim change only `host` and `rev`, so a new host
+  cannot name itself in the same write; step() does it on its first tick. That needs
+  `ctx.me`, which is why hostTick passes `me` and `key` (a test pins the call).
+- **The host adopts its own key on write** (`iceKey = normalizeKey(...)` after
+  `writeKey`): a listener never re-fires for its own write once it is committed. The key
+  listener has NO `hasPendingWrites` skip for the same reason.
+- **Cards keep their positions through the boundary** — a junk card normalizes to an
+  empty one, never dropped — because the key names authors BY POSITION. `normalizeKey` is
+  all or nothing for the same reason.
+- **Authors are listed in ARRIVAL order (`game.authors`), never card order**, and nothing
+  on the room names a writer before `reveal`: a test walks the host's and a player's
+  screen during a guess. "This one is yours" comes from `myIce.write`, this browser's
+  memory, and the host ignores a pick on your own card whatever the screen showed.
+- **The ice stage refreshes in place** (`GAMES.ice.refresh`, keyed on mode, step, round,
+  WHO and "answered"): the two-truths form is three boxes and `keepTyping()` only keeps
+  the focused one. `who` is in the key because the suite plants a second viewer on the
+  same step — without it the first viewer's buttons stayed on screen.
+- **Results empty the cards and the key** (and a new prompt empties the cards): what
+  people wrote leaves the cloud with the prompt it answered. privacy.html says so.
+
 **M3 — drawing & guess (2026-10-27, branch `m3-drawing`).** `GAMES.draw` — a PURE `step()`
 through `pick` (10 s) → `draw` (60/75/90 s, hints at 40% and 67%) → `turnEnd` (6 s) → the
 next ONLINE drawer, `advance()` appending late joiners — a synchronous `sha256Hex`, the
@@ -228,8 +267,8 @@ Firebase console steps are a numbered checklist in the README and need Charles.
 - A new field on a room, a player or an answer goes into the matching `normalize*`
   allowlist, into `firestore.rules`, AND bumps `SCHEMA` in the same commit, or the boundary
   strips it and the rules refuse it.
-- Nicknames (20), questions (160), answers (60 × 4) and drawing guesses (40) are the only
-  free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
+- Nicknames (20), questions (160), answers (60 × 4), drawing guesses (40) and icebreaker
+  answers (120, or 60 × 3 for two truths) are the only free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
   none is to be added.**
 - Escape everything rendered with `esc()`. Every nickname, question and answer on screen
   was typed in another browser: it is untrusted input on the shared origin.

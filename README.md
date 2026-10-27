@@ -2,7 +2,7 @@
 
 A room your team drops into beside the Teams or Zoom call you already have open. Pick a
 nickname, start a room or join one with its six-letter code, see who's around, and let the
-host run a round of trivia or a drawing game while everyone talks. No account, nothing to install, and
+host run a round of trivia, a drawing game or an icebreaker while everyone talks. No account, nothing to install, and
 nobody can open a room once it has ended.
 
 **Live: https://eagleadams86.github.io/break-room/** · **Privacy:** [privacy.html](https://eagleadams86.github.io/break-room/privacy.html)
@@ -14,6 +14,35 @@ anything from a work system. The plan is in
 decides that the rest of the family has not.
 
 ## What It Does Today
+
+**Milestone 4 — icebreakers (27 October 2026).** Three ways to get people talking, picked
+under *Kind* once the host chooses Icebreakers in the lobby:
+
+- **Who Said It?** Everyone finishes a sentence about themselves ("My most useless
+  talent…", one of 24 prompts; the host picks 1–3 prompts a game). The answers go up one at
+  a time, **unsigned and shuffled**, and everyone has 15 seconds to guess who wrote each.
+  Your own answer says "This one is yours — keep a straight face" instead of offering you
+  the buttons. Needs three people online.
+- **Two Truths and a Lie.** Everyone fills in three boxes — the lie, a truth, another
+  truth — and the three are shuffled before anyone sees them. Then one player's set at a
+  time, everyone else has 20 seconds to pick the lie.
+- **Best Answer.** A silly prompt ("A terrible name for a boat"), every answer on screen at
+  once, unsigned, and 30 seconds to vote for a favorite. You cannot vote for your own.
+- **Points:** 50 for guessing the writer or spotting the lie, and **25 to the writer for
+  every player they fooled**; in Best Answer, 100 for every vote your answer gets. No speed
+  bonus in any of them — this is the talking game. Points join the night's running total
+  like the others.
+- **Nobody's screen names a writer until the reveal — not even the host's.** Which answer
+  is whose (and where the lie went) is kept in a separate document in the cloud that the
+  security rules let **only the host's browser** read; the room everyone reads holds only
+  the shuffled text. If the host leaves or goes quiet mid-game, the player who takes over
+  names themselves as that document's reader and the game carries on from the same answer.
+  As with the drawing game's word, a host with the browser's developer tools open could
+  find out early: it hides the writers from the screen, not from a determined cheat.
+- **What people wrote leaves the cloud with its prompt.** The next prompt clears the
+  answers off the room, and the end of the game clears them and the who-wrote-what map.
+- **The demo room plays all three**: the invented players write canned answers, guess,
+  spot lies and vote at their own pace.
 
 **Milestone 3 — drawing & guess (27 October 2026).** One person draws, everyone else
 types guesses:
@@ -105,9 +134,9 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (163 tests as of milestone 3).
+clause by clause, and a suite with a floor (184 tests as of milestone 4).
 
-**Coming next:** icebreakers (milestone 4), Codenames (5), and last
+**Coming next:** Codenames (milestone 5), and last
 of all Google sign-in for a standing house with a cross-night leaderboard (6).
 
 ## How a Room Works
