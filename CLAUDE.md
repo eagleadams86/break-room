@@ -86,12 +86,33 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
+**M1 — the lobby (2026-10-27).** The cloud module (anonymous sign-in, listeners with the
+`hasPendingWrites` skip, `create`/`join`/`push`/`answer`/`heartbeat`/`claimHost`/`extend`/
+`leave`), the lobby with roster and dots, the room card with the expiry countdown and
+Extend, the Invite window and `#join=` arrival (lenient, fragment stripped at once), the
+host loop (`hostTick`: one push at a time, waits for its own rev), the handoff, and the demo
+transport (`demoSim`) with four invented players. `FIREBASE_CONFIG` is still null: nothing
+cloud-side has been exercised against a real project yet — the module is argued from
+League Night's and the rules, not observed. `EXPECTED` 111.
+
 **M0 — scaffold (2026-10-27).** The shell, the local store, the room-code helpers, the
 boundary allowlists, the presence and handoff helpers, the home card, `firestore.rules`
-argued clause by clause, privacy.html for anonymous sign-in and six-hour rooms, and a
-94-test suite. `FIREBASE_CONFIG` is null: the page runs fully local and every door on the
-home card says so. The Firebase console steps are a numbered checklist in the README and
-need Charles.
+argued clause by clause, privacy.html for anonymous sign-in and six-hour rooms. The
+Firebase console steps are a numbered checklist in the README and need Charles.
+
+**Things a tidy-up would break (M1):**
+- **The demo transport writes nothing to storage** — `enterRoom` skips `local.code` and
+  the recent list while `demoOn`, or a reload would try to rejoin a room that only ever
+  existed in one tab's memory. The suite pins that the demo never reaches `recent`.
+- **`renderScores` draws nothing until a score exists.** A table of noughts before the
+  first game teaches nothing and the roster already names everyone.
+- **The host's picker survives a redraw because `pickState()` reads it back first.** The
+  room is redrawn wholesale on every snapshot (a diff would be a second renderer to keep
+  right); the picker is selects, never a text box, for the same reason.
+- **The suite moves the frame's clock to the fixtures' T0** (`__setOffset`) before
+  reading a dot. T0 is in 2027; without the offset every fixture player reads as online.
+- **A join link's code is read with a boundary on BOTH sides** — `(?:^|[^A-Z0-9])` before
+  and `(?![A-Z0-9])` after — or `#join=ABCDEFG` reads as `BCDEFG`.
 
 ## Editing rules
 

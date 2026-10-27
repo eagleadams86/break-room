@@ -1017,7 +1017,11 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
            nothing is worse than no button. -->
       <p id="noCloud" hidden><strong>This copy of Break Room isn't connected to its cloud yet</strong>,
         so a room can't be started or joined from here. The steps are in the README.</p>
-      <!-- M1-DEMO-SLOT -->
+      <!-- The third door: the family's "Load Sample Data", which here is a whole
+           room with invented players in it. Nothing it does is saved. -->
+      <p class="actions"><button type="button" id="demoBtn">Try a Demo Room</button></p>
+      <p><strong>Try a Demo Room</strong> opens a room of invented players who answer on their own,
+        so you can see the lobby and play a round before inviting anyone real. Nothing in it is saved.</p>
     </div>
   </div>
 
@@ -1096,7 +1100,26 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   </div>
 </dialog>
 
-<!-- M1-DIALOG-SLOT -->
+<!-- ── The Invite window ─────────────────────────────────────────────────────
+     The family's Share slot. The code is the thing read out over the call;
+     the link is for a chat message, and it drops whoever opens it straight
+     into the room. -->
+<dialog id="inviteDialog" aria-labelledby="inviteTitle">
+  <h2 id="inviteTitle">Invite Someone</h2>
+  <p>Read the code out over the call, or send the link — it opens Break Room on this room.
+    Anyone who has it can join, so share it with the people you want in the room.</p>
+  <div class="code-row" style="margin-bottom:var(--sp-5)"><span class="code" id="inviteCode"></span></div>
+  <div class="field">
+    <label for="inviteLink">Link</label>
+    <input type="text" id="inviteLink" readonly aria-label="Join link">
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button type="button" class="primary" id="inviteCopyBtn">Copy Link</button>
+    <button type="button" id="inviteShareBtn" hidden><span aria-hidden="true">↗</span> Share…</button>
+    <span class="spacer" style="flex:1 1 auto"></span>
+    <button type="button" id="inviteCloseBtn">Done</button>
+  </div>
+</dialog>
 
 <!-- The help window. ONE window for the whole app, filled from the HELP table
      by whichever info dot was pressed — that is the shape every sibling uses.
@@ -1579,10 +1602,483 @@ function renderHome() {
   document.getElementById('noCloud').hidden = cloud;
   document.getElementById('createBtn').disabled = !cloud;
   document.getElementById('joinBtn').disabled = !cloud;
+  document.getElementById('demoBtn').disabled = !!room;
 }
 
-/* M1-RENDER-SLOT */
-function renderRoom() { /* the lobby and the games arrive with milestone 1 */ }
+/* ═══════════════════════════ The room on screen ══════════════════════════
+   Everything inside #roomView is built here from `room`, `players` and
+   `answers` — another browser's data, escaped on the way out, every time.
+   Wholesale innerHTML on every snapshot is deliberate: a room changes a
+   dozen times a minute and a diff would be a second renderer to keep right.
+   The two things a wholesale redraw would break — the host's game picker
+   mid-choice and a text box mid-word — are read back before the redraw
+   (`pickState()`) and have no text box at all (the picker is selects). */
+
+const PLAYER_BY = () => { const m = {}; players.forEach((p) => { m[p.uid] = p; }); return m; };
+function nickOf(uid) { const p = players.find((x) => x.uid === uid); return p ? p.nick : 'Someone'; }
+function initials(nick) {
+  const parts = String(nick).trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : String(nick).slice(0, 2)).toUpperCase();
+}
+function avatarHtml(p) {
+  return '<span class="avatar h' + ((p.hue % 5) + 1) + '" aria-hidden="true">' + esc(initials(p.nick)) + '</span>';
+}
+/* "5h 12m", "48m", "under a minute", or "ended". Minutes, never seconds: an
+   expiry is a thing you glance at, and a ticking second hand says hurry. */
+function fmtLeft(ms) {
+  if (ms <= 0) return 'ended';
+  if (ms < 60000) return 'under a minute';
+  const m = Math.ceil(ms / 60000);
+  if (m < 60) return m + 'm';
+  return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+}
+function fmtSecs(ms) { return String(Math.max(0, Math.ceil(ms / 1000))); }
+const iAmHost = () => !!(room && me && room.host === me);
+
+function renderRoster() {
+  const t = now();
+  const sorted = players.slice();   /* arrival order, from the normalizer */
+  return '<div class="card"><h2>Who’s Here'
+    + '<button class="tile-help" type="button" data-help="online" aria-label="What the online dot means">i</button>'
+    + '<span class="spacer"></span><span class="pill">' + sorted.filter((p) => isOnline(p, t)).length + ' of ' + sorted.length + ' online</span></h2>'
+    + '<ul class="roster">'
+    + sorted.map((p) => {
+        const on = isOnline(p, t);
+        return '<li data-uid="' + esc(p.uid) + '"><span class="dot' + (on ? ' on' : '') + '"></span>'
+          + '<span class="sr-only">' + (on ? 'online' : 'away') + '</span>'
+          + avatarHtml(p)
+          + '<span class="who">' + esc(p.nick) + (p.uid === me ? ' <span class="you">(you)</span>' : '') + '</span>'
+          + (p.uid === room.host ? '<span class="pill ok">host</span>' : '')
+          + '</li>';
+      }).join('')
+    + '</ul></div>';
+}
+
+function renderRoomCard() {
+  const t = now();
+  const left = room.expiresAt - t;
+  const canExtend = iAmHost() && room.expiresAt + EXTEND_MS <= room.createdAt + ROOM_MAX_MS + 1000;
+  return '<div class="card"><h2>Room'
+    + '<button class="tile-help" type="button" data-help="code" aria-label="How a room code works">i</button></h2>'
+    + '<div class="code-row"><span class="code" id="roomCode" title="The room code">' + esc(local.code) + '</span>'
+    + '<button type="button" class="btn-small" id="inviteBtn2"><span aria-hidden="true">↗</span> Invite</button></div>'
+    + '<p class="hint" style="margin:var(--sp-4) 0 0">Ends in <span id="roomLeft">' + esc(fmtLeft(left)) + '</span>'
+    + (canExtend ? ' · <button type="button" class="link" id="extendBtn">add 2 hours</button>' : '')
+    + (iAmHost() && !canExtend ? ' · at the twelve-hour limit' : '') + '</p>'
+    + '<div class="row-actions" style="justify-content:flex-start;margin-top:var(--sp-5)">'
+    + '<button type="button" id="leaveBtn">Leave the Room</button></div>'
+    + '</div>';
+}
+
+function renderScores(title) {
+  /* Nothing to score yet: a table of noughts before the first game teaches
+     nothing, and the roster already names everyone. */
+  if (!Object.keys(room.scores).length) return '';
+  const t = now();
+  const rows = players.map((p) => ({ uid: p.uid, nick: p.nick, pts: room.scores[p.uid] || 0, on: isOnline(p, t) }))
+    .concat(Object.keys(room.scores).filter((u) => !players.some((p) => p.uid === u))
+      .map((u) => ({ uid: u, nick: 'Left the room', pts: room.scores[u] || 0, on: false })))
+    .sort((a, b) => b.pts - a.pts || a.nick.localeCompare(b.nick));
+  if (!rows.length) return '';
+  const top = rows[0].pts;
+  return '<div class="card"><h2>' + esc(title || 'Scores')
+    + '<button class="tile-help" type="button" data-help="scores" aria-label="How points are worked out">i</button></h2>'
+    + '<div class="table-scroll"><table class="scores"><thead><tr><th scope="col">Player</th><th scope="col" class="num">Points</th></tr></thead><tbody>'
+    + rows.map((r) => '<tr' + (r.pts === top && top > 0 ? ' class="lead"' : '') + '><th scope="row">' + esc(r.nick)
+        + (r.uid === me ? ' <span class="you">(you)</span>' : '') + '</th><td class="num">' + r.pts + '</td></tr>').join('')
+    + '</tbody></table></div></div>';
+}
+
+/* The host's choices while the lobby is up, read back before every redraw so
+   a snapshot arriving mid-choice does not reset the picker. View state, never
+   saved: the choices are copied onto the room document when the game starts. */
+let pick = { kind: 'trivia', pack: '', n: '20', secs: '20' };
+function pickState() {
+  const k = $('pickKind'), p = $('pickPack'), n = $('pickN'), s = $('pickSecs');
+  if (k) pick.kind = k.value;
+  if (p) pick.pack = p.value;
+  if (n) pick.n = n.value;
+  if (s) pick.secs = s.value;
+}
+
+function renderLobby() {
+  const kinds = Object.keys(GAMES);
+  let picker = '';
+  if (iAmHost()) {
+    if (!kinds.length) {
+      picker = '<p class="lede">The games arrive with the next milestone. For now the room is a place to see who’s here.</p>';
+    } else {
+      const g = GAMES[pick.kind] || GAMES[kinds[0]];
+      picker = '<div class="grid2">'
+        + '<div class="field"><label for="pickKind">Game</label><select id="pickKind">'
+        + kinds.map((k) => '<option value="' + esc(k) + '"' + (k === g.id ? ' selected' : '') + '>' + esc(GAMES[k].name) + '</option>').join('')
+        + '</select></div>'
+        + (g.options ? g.options(pick) : '')
+        + '</div>'
+        + '<div class="row-actions" style="justify-content:flex-start">'
+        + '<button type="button" class="primary" id="startBtn">Start ' + esc(g.name) + '</button>'
+        + (g.extra ? g.extra() : '') + '</div>'
+        + '<p class="warn-line" id="lobbyWarn" role="status"></p>';
+    }
+  } else {
+    picker = '<p class="lede">Waiting for <strong>' + esc(nickOf(room.host)) + '</strong> to start a game. '
+      + 'Keep the call open — the room is the game, the call is the talking.</p>';
+  }
+  return '<div class="card"><h2>Lobby</h2>' + picker + '</div>' + renderScores('Scores So Far');
+}
+
+function renderPlay() {
+  const g = GAMES[room.kind];
+  if (!g) return '<div class="card"><h2>A Game Is On</h2><p class="lede">This copy of Break Room does not know the game <strong>' + esc(String(room.kind)) + '</strong> — reload to pick up the latest version.</p></div>';
+  return g.view(room, me, players, answers, now());
+}
+
+function renderResults() {
+  const g = GAMES[room.kind];
+  return '<div class="card"><h2>' + esc(g ? g.name + ' — Results' : 'Results') + '</h2>'
+    + (g && g.results ? g.results(room, me, players) : '')
+    + (iAmHost()
+        ? '<div class="row-actions" style="justify-content:flex-start"><button type="button" class="primary" id="backBtn">Back to the Lobby</button></div>'
+        : '<p class="lede">Waiting for <strong>' + esc(nickOf(room.host)) + '</strong> to go back to the lobby.</p>')
+    + '</div>' + renderScores('Scores for the Night');
+}
+
+/* The whole room. The host-overdue line is the one thing a PLAYER sees
+   about the engine: if the host's browser has not moved the game on for ten
+   seconds past when it should have, say so, rather than leaving a frozen
+   countdown that looks like a broken app. */
+function renderRoom() {
+  pickState();
+  let main;
+  if (room.phase === 'play') main = renderPlay();
+  else if (room.phase === 'results') main = renderResults();
+  else main = renderLobby();
+  const overdue = room.phase === 'play' && !iAmHost() && room.game.stepAt && room.game.stepMs
+    && now() > room.game.stepAt + room.game.stepMs + HOST_OVERDUE_MS;
+  $('roomView').innerHTML = '<div class="room"><div class="mainc">'
+    + (overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
+        + esc(nickOf(room.host)) + '</strong>’s browser has not moved the game on. If they have gone, the room passes to the next player in three minutes.</p>' : '')
+    + main + '</div><div class="side">' + renderRoomCard() + renderRoster() + '</div></div>';
+}
+
+/* The cheap tick: the two countdowns change every second, and a full redraw
+   per second would fight the host's picker. Everything else waits for a
+   snapshot. */
+function tickUI() {
+  if (!room) return;
+  const left = $('roomLeft');
+  if (left) left.textContent = fmtLeft(room.expiresAt - now());
+  const g = GAMES[room.kind];
+  if (room.phase === 'play' && g && g.tick) g.tick(room, now());
+}
+
+/* ═══════════════════════ Entering, leaving, the engine ═══════════════════ */
+
+/* The active transport: the demo's in-memory one, or the cloud module's.
+   Both answer the same eleven calls, which is what lets every line below be
+   tested with neither Firebase nor a network. */
+let demoOn = false;
+function transport() { return demoOn ? demoSim : window.brCloud; }
+
+let heartbeatTimer = null, tickTimer = null, lastWriteAt = 0, claimAskedAt = 0;
+let pushInFlight = false, pendingRev = 0, pendingSince = 0;
+
+function noteWrite() { lastWriteAt = Date.now(); }
+
+/* Into a room: remember the code, start the heartbeat and the tick, and
+   listen. The first snapshot is what draws the room — nothing is drawn from
+   a guess. */
+function enterRoom(code) {
+  /* The demo remembers nothing: a reload must not try to rejoin a room that
+     only ever existed in this tab's memory. */
+  if (!demoOn) {
+    local.code = code;
+    local.recent = [{ code: code, at: Date.now() }].concat(local.recent.filter((r) => r.code !== code)).slice(0, RECENT_MAX);
+    save();
+  } else { local.code = code; }
+  noteWrite();
+  transport().listen(code);
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(heartbeat, 15000);
+  clearInterval(tickTimer);
+  tickTimer = setInterval(() => { tickUI(); hostTick(); }, 500);
+}
+
+/* Presence. Checked every 15 s and WRITTEN only when nothing else has been
+   written for 90 s — an answer or a host transaction is a heartbeat too. */
+function heartbeat() {
+  if (!room || !me) return;
+  if (Date.now() - lastWriteAt < HEARTBEAT_MS) return;
+  noteWrite();
+  transport().heartbeat().catch((e) => console.warn('heartbeat', e));
+}
+
+/* Out of a room. As the host with others online, the room is HANDED to the
+   next player first, so it never waits three minutes for a handoff it could
+   have had at once; as the last one out, the room is closed. */
+async function leaveRoom(reason) {
+  const t = transport();
+  const code = local.code;
+  clearInterval(heartbeatTimer); heartbeatTimer = null;
+  clearInterval(tickTimer); tickTimer = null;
+  let handTo = null, closeRoom = false;
+  if (room && iAmHost()) {
+    const others = players.filter((p) => p.uid !== me);
+    handTo = nextHost(others, now());
+    closeRoom = !handTo;
+  }
+  try { await t.leave({ handTo: handTo, closeRoom: closeRoom }); } catch (e) { console.warn('leave', e); }
+  t.stop();
+  room = null; players = []; answers = []; demoOn = false;
+  pendingRev = 0; pushInFlight = false;
+  if (local.code === code) { local.code = ''; save(); }
+  render();
+  if (reason) toast(reason);
+}
+
+/* ── The host loop ─────────────────────────────────────────────────────────
+   Runs on the tick, on every snapshot and when the tab comes back. Two jobs:
+   if I am the host and a game is on, ask the game's PURE step() for a patch
+   and push it; if I am not the host and the host has gone stale, take the
+   seat if I am the longest-present online player.
+
+   ONE PUSH AT A TIME, and nothing until its snapshot lands: step() is pure on
+   `room`, so until the room document comes back with the new rev the same
+   patch would be computed again. `pendingRev` is what the next snapshot has
+   to reach; a ten-second ceiling lets a lost push be tried again. */
+function hostTick() {
+  if (!room || !me || !transport() || !transport().on) return;
+  const t = now();
+  if (!iAmHost()) {
+    if (hostIsStale(players, room.host, t) && nextHost(players, t) === me && Date.now() - claimAskedAt > 30000) {
+      claimAskedAt = Date.now();
+      noteWrite();
+      transport().claimHost().then(() => toast('The host has gone quiet — you are running the room now'))
+        .catch((e) => console.warn('claim', e));
+    }
+    return;
+  }
+  if (pushInFlight) return;
+  if (pendingRev && room.rev < pendingRev && Date.now() - pendingSince < 10000) return;
+  if (room.phase !== 'play') return;
+  const g = GAMES[room.kind];
+  if (!g) return;
+  const patch = g.step(room, { answers: answers, players: players, now: t });
+  if (patch) pushPatch(patch);
+}
+
+function pushPatch(patch) {
+  if (pushInFlight) return Promise.resolve(false);
+  pushInFlight = true;
+  noteWrite();
+  return transport().push(patch).then((rev) => {
+    pendingRev = rev; pendingSince = Date.now();
+    return true;
+  }).catch((e) => {
+    console.warn('push', e);
+    if (String(e && e.code) === 'br/not-host') toast('Somebody else is running the room now');
+    else toast('That change didn’t reach the room — check the connection');
+    return false;
+  }).finally(() => { pushInFlight = false; });
+}
+
+/* ── What the transports call back ────────────────────────────────────────
+   The contract between this script and the cloud module (and the demo),
+   League Night's `window.ln*` shape: snapshots come in raw and leave the
+   boundary normalized; nothing here is trusted until it has. */
+window.brApp = {
+  schema: SCHEMA,
+  randomCode: randomCode,
+  local: () => local,
+  me: () => me,
+  room: () => room,
+  onAuth: (id) => {
+    me = ID_RE.test(String(id || '')) ? String(id) : null;
+    render();
+    if (me) afterAuth();
+  },
+  onRoom: (raw) => {
+    if (!local.code && !demoOn) return;
+    if (raw == null) { leaveRoom('The room was closed'); return; }
+    if (Number(raw.schema || 1) > SCHEMA) haltForNewerData(raw.schema);
+    const next = normalizeRoom(raw);
+    if (!next) { leaveRoom('The room could not be read'); return; }
+    if (next.expiresAt <= now()) { leaveRoom('That room has ended'); return; }
+    room = next;
+    render();
+    hostTick();
+  },
+  onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); },
+  onAnswers: (list) => { answers = normalizeAnswers(list); hostTick(); },
+  onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
+  onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
+  noteWrite: noteWrite,
+};
+function describeCloudError(e) {
+  const code = String((e && e.code) || '');
+  if (code.indexOf('permission-denied') !== -1) return 'The cloud refused that — the room may have ended, or the rules in the console are behind';
+  if (code.indexOf('unavailable') !== -1) return 'No connection to the cloud right now';
+  if (code.indexOf('resource-exhausted') !== -1) return 'The free quota for today is used up — it resets tomorrow';
+  return 'Something went wrong talking to the cloud';
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { tickUI(); hostTick(); heartbeat(); } });
+
+/* After the anonymous sign-in has answered: a join link, else the room this
+   browser was in (a reload rejoins silently), else nothing. */
+let joinArrival = null;
+async function afterAuth() {
+  if (demoOn || room) return;
+  if (joinArrival) {
+    const code = joinArrival; joinArrival = null;
+    $('joinCode').value = code;
+    if (local.nick) { await doJoin(code, local.nick, true); return; }
+    toast('Pick a nickname to join room ' + code);
+    $('nickBox').focus();
+    return;
+  }
+  if (local.code && local.nick) await doJoin(local.code, local.nick, true);
+}
+
+async function doCreate(nick) {
+  const t = transport();
+  $('createBtn').disabled = true;
+  try {
+    const code = await t.create(nick);
+    enterRoom(code);
+    toast('Room ' + code + ' is open — invite people with the ↗ Invite button');
+  } catch (e) {
+    console.warn('create', e);
+    $('homeWarn').textContent = 'The room could not be opened: ' + describeCloudError(e) + '.';
+  } finally { if ($('createBtn')) $('createBtn').disabled = !cloudOn() && !demoOn; }
+}
+async function doJoin(code, nick, quiet) {
+  const t = transport();
+  $('joinBtn').disabled = true;
+  try {
+    const r = await t.join(code, nick);
+    if (r === 'joined') { enterRoom(code); if (!quiet) toast('You’re in'); return; }
+    if (local.code === code) { local.code = ''; save(); }
+    $('homeWarn').textContent = r === 'not-found' ? 'No room has the code ' + code + ' — check it with whoever started it.'
+      : r === 'expired' ? 'Room ' + code + ' has ended.'
+      : r === 'full' ? 'Room ' + code + ' is full.'
+      : 'Could not join room ' + code + '.';
+  } catch (e) {
+    console.warn('join', e);
+    $('homeWarn').textContent = 'Could not join: ' + describeCloudError(e) + '.';
+  } finally { $('joinBtn').disabled = !cloudOn() && !demoOn; }
+}
+
+/* ── Arriving by a join link ───────────────────────────────────────────────
+   Read once, before anything renders, and TAKEN OFF THE ADDRESS at once, so
+   the code does not sit in the history. Read LENIENTLY (League Night's
+   lesson): the code is the first thing shaped like one after `#join=`, and
+   whatever a share sheet or a mail client tacked on is ignored. Pure. */
+const JOIN_RE = /^#join=/i;
+function parseJoinHash(hash) {
+  let h = String(hash || '');
+  try { h = decodeURIComponent(h); } catch (e) { /* read it raw */ }
+  if (!JOIN_RE.test(h)) return null;
+  const m = /(?:^|[^A-Z0-9])([A-Z2-9]{6})(?![A-Z0-9])/i.exec(h.slice(6));
+  if (!m) return null;
+  const code = m[1].toUpperCase();
+  return CODE_RE.test(code) ? code : null;
+}
+function joinLink(code) {
+  return location.origin + location.pathname + '#join=' + code;
+}
+joinArrival = parseJoinHash(location.hash);
+if (joinArrival) {
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+}
+
+/* ═══════════════════════════ The demo room ════════════════════════════════
+   THE SAMPLE DATA IS THE DEMO, and here the demo is a whole room: an
+   in-memory transport with five invented players who answer on their own,
+   so every screen in the app can be seen — and tested — with no cloud, no
+   console and no second browser. The players are named for what they show.
+   Nothing it does is saved, and leaving it forgets it. */
+const DEMO_PLAYERS = [
+  { uid: 'demoPriyaWhoIsOnline000000', nick: 'Priya (online)', hue: 1, awayMs: 0 },
+  { uid: 'demoMarcusAnswersFast00000', nick: 'Marcus (answers fast)', hue: 2, awayMs: 0 },
+  { uid: 'demoLenaAnswersSlowly00000', nick: 'Lena (answers slowly)', hue: 3, awayMs: 0 },
+  { uid: 'demoTomSteppedAway00000000', nick: 'Tom (stepped away)', hue: 4, awayMs: 10 * 60000 },
+];
+const DEMO_ME = 'demoYouTheHost000000000000';
+const demoSim = (() => {
+  let simRoom = null, simPlayers = {}, simAnswers = {}, code = '', timers = [];
+  const emit = () => setTimeout(() => {
+    if (!simRoom) { window.brApp.onRoom(null); return; }
+    window.brApp.onRoom(JSON.parse(JSON.stringify(simRoom)));
+    window.brApp.onPlayers(Object.keys(simPlayers).map((u) => Object.assign({ uid: u }, simPlayers[u])));
+    window.brApp.onAnswers(Object.keys(simAnswers).map((u) => Object.assign({ uid: u }, simAnswers[u])));
+  }, 0);
+  /* A patch from the host, applied the way the cloud's transaction would:
+     `stepAt: 'now'` becomes the clock, `rev` goes up by one. */
+  const applyPatch = (patch) => {
+    const next = JSON.parse(JSON.stringify(patch));
+    if (next.game && next.game.stepAt === 'now') next.game.stepAt = Date.now();
+    Object.assign(simRoom, next);
+    simRoom.rev += 1;
+    return simRoom.rev;
+  };
+  const stopTimers = () => { timers.forEach(clearTimeout); timers = []; };
+  return {
+    on: true,
+    uid: () => DEMO_ME,
+    create: async (nick) => {
+      code = 'DEMO' + randomCode().slice(0, 2);
+      const t = Date.now();
+      simRoom = { host: DEMO_ME, rev: 0, schema: SCHEMA, createdAt: t, expiresAt: t + ROOM_MS,
+                  phase: 'lobby', kind: null, game: {}, scores: {}, feed: [], pack: null };
+      simPlayers = {};
+      simPlayers[DEMO_ME] = { nick: nick, joinedAt: t, seenAt: t, ansR: 0, hue: 0 };
+      DEMO_PLAYERS.forEach((p, i) => { simPlayers[p.uid] = { nick: p.nick, joinedAt: t + 1000 * (i + 1), seenAt: t - p.awayMs, ansR: 0, hue: p.hue }; });
+      simAnswers = {};
+      return code;
+    },
+    join: async () => 'not-found',
+    listen: () => emit(),
+    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; },
+    push: async (patch) => {
+      if (!simRoom) throw Object.assign(new Error('gone'), { code: 'br/gone' });
+      const rev = applyPatch(patch);
+      /* The invented players answer a new question on their own, each at
+         their own pace — which is what shows the speed bonus. */
+      if (simRoom.phase === 'play' && simRoom.game.step === 'ask') {
+        stopTimers();
+        const g = GAMES[simRoom.kind];
+        DEMO_PLAYERS.filter((p) => !p.awayMs).forEach((p, i) => {
+          const delay = 1500 + i * 2500 + Math.floor(Math.random() * 1500);
+          timers.push(setTimeout(() => {
+            if (!simRoom || simRoom.game.step !== 'ask') return;
+            const v = g && g.demoAnswer ? g.demoAnswer(simRoom, p) : 0;
+            simAnswers[p.uid] = { r: simRoom.game.round, v: v, at: Date.now() };
+            simPlayers[p.uid].ansR = simRoom.game.round;
+            simPlayers[p.uid].seenAt = Date.now();
+            emit();
+          }, delay));
+        });
+      }
+      emit();
+      return rev;
+    },
+    answer: async (r, v) => {
+      simAnswers[DEMO_ME] = { r: r, v: v, at: Date.now() };
+      simPlayers[DEMO_ME].ansR = r; simPlayers[DEMO_ME].seenAt = Date.now();
+      emit();
+    },
+    heartbeat: async () => { if (simPlayers[DEMO_ME]) simPlayers[DEMO_ME].seenAt = Date.now(); emit(); },
+    claimHost: async () => {},
+    extend: async (ms) => { simRoom.expiresAt = ms; simRoom.rev += 1; emit(); return simRoom.rev; },
+    leave: async () => { stopTimers(); simRoom = null; },
+  };
+})();
+async function startDemo() {
+  const nick = $('nickBox').value.trim().slice(0, NICK_MAX) || 'You';
+  demoOn = true;
+  me = DEMO_ME;
+  await doCreate(nick);
+}
 
 /* ═══════════════════════════ Dialogs and chrome ═══════════════════════════ */
 
@@ -1833,9 +2329,65 @@ function readCode() {
   $('homeWarn').textContent = '';
   return code;
 }
-/* M1-WIRING-SLOT */
-$('createBtn').addEventListener('click', () => { if (readNick()) toast('Rooms arrive with the next milestone.'); });
-$('joinBtn').addEventListener('click', () => { if (readNick() && readCode()) toast('Rooms arrive with the next milestone.'); });
+$('createBtn').addEventListener('click', () => { const n = readNick(); if (n) doCreate(n); });
+$('joinBtn').addEventListener('click', () => { const n = readNick(); const c = n && readCode(); if (n && c) doJoin(c, n, false); });
+$('demoBtn').addEventListener('click', startDemo);
+
+/* Everything inside the room is delegated: the view is rebuilt on every
+   snapshot, so a listener on a button inside it would be thrown away with it. */
+$('roomView').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || !room) return;
+  if (b.id === 'leaveBtn') { leaveRoom(demoOn ? 'Demo over — nothing was saved' : 'You left the room'); return; }
+  if (b.id === 'inviteBtn2') { openInvite(); return; }
+  if (b.id === 'extendBtn') {
+    if (!iAmHost()) return;
+    const next = Math.min(room.expiresAt + EXTEND_MS, room.createdAt + ROOM_MAX_MS);
+    b.disabled = true;
+    noteWrite();
+    transport().extend(next).then(() => toast('The room now ends in ' + fmtLeft(next - now())))
+      .catch((ex) => { console.warn('extend', ex); toast(describeCloudError(ex)); });
+    return;
+  }
+  if (b.id === 'startBtn') { startGame(); return; }
+  if (b.id === 'backBtn') { if (iAmHost()) pushPatch({ phase: 'lobby', kind: null, game: {}, pack: null }); return; }
+  const g = GAMES[room.kind];
+  if (g && g.onClick) g.onClick(b, room, me);
+});
+/* M2-WIRING-SLOT */
+function startGame() {
+  pickState();
+  const g = GAMES[pick.kind];
+  if (!g || !iAmHost()) return;
+  const built = g.setup(pick, players, local);
+  if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
+  pushPatch({ phase: 'play', kind: g.id, game: built.game, pack: built.pack || null });
+}
+
+/* ── The Invite window ─────────────────────────────────────────────────────
+   The family's Share slot, repurposed: the code, the link, Web Share where
+   the browser has it, and a copy button. The WORDS come first and the LINK
+   last (League Night's lesson — a share sheet glued the two together). */
+function openInvite() {
+  if (!room || !local.code) return;
+  $('inviteCode').textContent = local.code;
+  $('inviteLink').value = joinLink(local.code);
+  $('inviteShareBtn').hidden = !navigator.share;
+  openModal($('inviteDialog'));
+}
+$('inviteBtn').addEventListener('click', openInvite);
+$('inviteCopyBtn').addEventListener('click', async () => {
+  const v = $('inviteLink').value;
+  try { await navigator.clipboard.writeText(v); toast('Link copied'); }
+  catch (e) { $('inviteLink').select(); toast('Press ⌘C to copy'); }
+});
+$('inviteShareBtn').addEventListener('click', async () => {
+  const words = 'Join me in Break Room — the code is ' + local.code + '.';
+  try { await navigator.share({ title: 'Break Room', text: words, url: joinLink(local.code) }); }
+  catch (e) { if (!(e && e.name === 'AbortError')) toast('Could not share — copy the link instead'); }
+});
+$('inviteCloseBtn').addEventListener('click', () => $('inviteDialog').close());
+closeOnBackdropClick($('inviteDialog'));
 $('joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('joinBtn').click(); } });
 $('nickBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('createBtn').click(); } });
 $('recentWrap').addEventListener('click', (e) => {
@@ -1855,7 +2407,10 @@ $('recentWrap').addEventListener('click', (e) => {
 const HELP = {
   code: ['How a Room Code Works', `<p>A room is <strong>six letters or numbers</strong> from an alphabet with no O, 0, I or 1, so a code read out over a call cannot be misheard into a different room. Anyone holding the code can join — there is no password, and the code is deliberately not something that can be guessed or listed.</p>
     <p>A room <strong>lives for six hours</strong> from the moment it is started; the host can extend it two hours at a time up to twelve. Once it has expired nobody can join or play, and the room and everything in it is <strong>deleted within a day</strong>.</p>`],
-  /* M1-HELP-SLOT */
+  online: ['What the Online Dot Means', `<p>Every player’s browser <strong>writes a heartbeat every 90 seconds</strong>, and the dot is green while that last write is <strong>under four minutes old</strong>. There is no instant “went offline” signal — a closed laptop simply stops writing, and the dot goes grey a few minutes later.</p>
+    <p>The host’s dot matters most: if the host’s browser has been silent for <strong>three minutes</strong>, the player who has been in the room longest takes over running it, and the game carries on from where the room says it is.</p>`],
+  scores: ['How Points Are Worked Out', `<p>A correct answer is worth <strong>100 points plus a speed bonus of up to 100</strong>: the bonus is the share of the question’s time that was still left when the answer arrived, so an answer at the halfway mark earns 150 in all. A wrong answer, or none, earns nothing and costs nothing.</p>
+    <p>Timing is measured by the <strong>server’s clock</strong> on both ends — when the question opened and when your answer landed — never by your own computer’s, so a slow laptop clock cannot help or hurt. Points <strong>carry across games</strong> for the whole night; someone who joins late starts on nought.</p>`],
 };
 const helpDialog = $('helpDialog');
 document.addEventListener('click', (e) => {
@@ -1949,7 +2504,7 @@ $('clearBtn').addEventListener('click', () => {
 $('clearBackupBtn').addEventListener('click', downloadBackup);
 $('clearCancel').addEventListener('click', () => clearDialog.close());
 $('clearConfirm').addEventListener('click', () => {
-  /* M1-CLEAR-LEAVE-SLOT */
+  if (room) leaveRoom(null);
   local = blankLocal();
   save();
   $('nickBox').value = '';
@@ -1970,6 +2525,9 @@ $('themeSel').addEventListener('change', (e) => setTheme(e.target.value));
 function boot() {
   load();
   setTheme(localStorage.getItem(THEME_KEY) || 'auto');
+  /* A join link's code goes into the box at once, cloud or no cloud, so the
+     reader sees what the link was for even where it cannot be followed. */
+  if (joinArrival) $('joinCode').value = joinArrival;
   render();
   /* The page is now drawn where it belongs, so let it be seen. In the SAME TASK
      as the render above — a frame later and the reveal is itself the flash. The
@@ -1990,6 +2548,7 @@ window.__brTestHooks = {
   __plantPlayers: function (list) { players = normalizePlayers(list); render(); },
   __plantAnswers: function (list) { answers = normalizeAnswers(list); render(); },
   __setMe: function (id) { me = id; render(); },
+  __setOffset: function (ms) { offset = ms; render(); },
   __room: function () { return room; },
   __players: function () { return players; },
   __answers: function () { return answers; },
@@ -2007,17 +2566,299 @@ window.__brTestHooks = {
   isOnline: isOnline, nextHost: nextHost, hostIsStale: hostIsStale,
   randomCode: randomCode, cleanCode: cleanCode, esc: esc, todayISO: todayISO,
   raisesKeyboard: raisesKeyboard, opensOnFocus: opensOnFocus, backupPayload: backupPayload,
-  /* M1-HOOKS-SLOT */
+  parseJoinHash: parseJoinHash, joinLink: joinLink, fmtLeft: fmtLeft, initials: initials,
+  demoSim: demoSim, DEMO_PLAYERS: DEMO_PLAYERS, DEMO_ME: DEMO_ME, __demo: (on) => { demoOn = !!on; }, __pick: () => pick,
+  transport: transport, hostTick: hostTick,
 };
 </script>
 
-<!-- M1-MODULE-SLOT -->
 <script type="module">
 /* ───────────────────────── The cloud: where a room lives ────────────────────
-   Arrives whole with milestone 1. Until then the config is null and this
-   page is fully local: every door on the home card says so. */
+   Anonymous Firebase sign-in and ONE SMALL SET OF DOCUMENTS PER ROOM that every
+   player's browser listens to. The shape is League Night's module — the
+   dynamic import() of the SDK, initializeAuth with the three persistences,
+   listenTo/stopListening with the hasPendingWrites skip, every room write a
+   transaction with rev + 1 — with Google sign-in taken out and the host loop's
+   needs put in. The classic script above never touches Firebase: it hands
+   patches here through `window.brCloud` and gets snapshots back through
+   `window.brApp`, which is what lets the suite drive the whole app without
+   loading a byte of this.
+
+   The config below is Firebase's PUBLIC client config, not a secret — access is
+   enforced by firestore.rules. While it is null the app is fully local: every
+   door on the home card says so, and the demo room is the only room there is.
+
+   ANONYMOUS, STATED PLAINLY: `signInAnonymously` happens the moment the page
+   opens, with no click, because there is nothing to agree to — Firebase mints
+   this browser a random uid, which identitytoolkit.googleapis.com hands over
+   without ever touching firebaseapp.com (the hostname the corporate filter
+   blocks). It persists in IndexedDB, so a reload is the same player; a
+   private window loses it on close and rejoins as a new one. TWO TABS IN ONE
+   PROFILE ARE ONE PLAYER for the same reason.
+──────────────────────────────────────────────────────────────────────────── */
+
+/* Firebase's PUBLIC web client config. Null until the project exists — the
+   README's "Setting Up the Cloud" is the checklist that produces it. */
 const FIREBASE_CONFIG = null;
-window.brCloud = { on: false };
+
+const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';
+const privacyNote = document.getElementById('privacyNote');
+
+/* The harness boots this page in a frame, and the suite must never reach the
+   cloud; a halted page must not either. Decided once, before anything loads. */
+const inFrame = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
+const cloudOn = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey) && !inFrame && !window.brHalted;
+
+let A, F, auth, db, user = null;
+let unsubs = [], listening = null, answersUnsub = null, relistenTimer = null;
+let roomExpiresMs = 0, roomHost = null;
+/* The clock offset: Date.now() when this browser last wrote a sentinel, and
+   what the server resolved it to, read back from the players listener. */
+let sentAt = 0;
+
+const RELISTEN_MS = 60000;
+const roomRef = (code) => F.doc(db, 'rooms', code);
+const playerRef = (code, uid) => F.doc(db, 'rooms', code, 'players', uid);
+const answerRef = (code, uid) => F.doc(db, 'rooms', code, 'answers', uid);
+const ts = (ms) => F.Timestamp.fromMillis(ms);
+/* A snapshot's Timestamps become milliseconds here, so the boundary in the
+   classic script deals in numbers — and still accepts a Timestamp shape,
+   because a boundary that depends on this having run is a boundary with a
+   hole. */
+function plain(v) {
+  if (v && typeof v.toMillis === 'function') return v.toMillis();
+  if (Array.isArray(v)) return v.map(plain);
+  if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach((k) => { o[k] = plain(v[k]); }); return o; }
+  return v;
+}
+/* And the other way: a patch from the host names its times in milliseconds,
+   with the one value only the server may set — `stepAt: 'now'` — becoming a
+   serverTimestamp() sentinel. `expiresAt` is the one Timestamp the client
+   sets itself (the rules cap it against the server's clock). */
+function forCloud(patch) {
+  const out = {};
+  Object.keys(patch).forEach((k) => {
+    const v = patch[k];
+    if (k === 'expiresAt' && typeof v === 'number') out[k] = ts(v);
+    else if (k === 'stepAt' && v === 'now') out[k] = F.serverTimestamp();
+    else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = forCloud(v);
+    else out[k] = v;
+  });
+  return out;
+}
+
+async function init() {
+  const [{ initializeApp }, authMod, fsMod] = await Promise.all([
+    import(SDK + 'firebase-app.js'), import(SDK + 'firebase-auth.js'), import(SDK + 'firebase-firestore.js'),
+  ]);
+  A = authMod; F = fsMod;
+  const app = initializeApp(FIREBASE_CONFIG);
+  /* initializeAuth rather than getAuth, to keep apis.google.com out of the
+     page — getAuth wires in a popup resolver nothing here reads. The three
+     persistences are getAuth's own, in its order. */
+  auth = A.initializeAuth(app, {
+    persistence: [A.indexedDBLocalPersistence, A.browserLocalPersistence, A.browserSessionPersistence],
+  });
+  db = F.getFirestore(app);
+  A.onAuthStateChanged(auth, (u) => {
+    user = u;
+    updateNote();
+    if (u) window.brApp.onAuth(u.uid);
+    else A.signInAnonymously(auth).catch((e) => { console.warn('anonymous sign-in', e); window.brApp.onError(e); });
+  });
+}
+function updateNote() {
+  if (!privacyNote) return;
+  privacyNote.textContent = user
+    ? '🔒 Signed in anonymously — this browser has a random id and nothing else. A room lives in the cloud for the evening and is deleted within a day.'
+    : '🔒 Your nickname stays in this browser. A room lives in the cloud for the evening — anyone holding its code can see it — and is deleted within a day.';
+}
+
+/* ── Listening to the room on screen ───────────────────────────────────────── */
+function stopListening() {
+  unsubs.forEach((u) => u()); unsubs = [];
+  if (answersUnsub) { answersUnsub(); answersUnsub = null; }
+  listening = null; roomHost = null;
+  clearTimeout(relistenTimer); relistenTimer = null;
+}
+function onListenError(e) {
+  window.brApp.onError(e);
+  const code = listening;
+  stopListening();
+  /* permission-denied is the room having ENDED (the rules refuse an expired
+     read) — say so and go home, rather than retrying a read the server will
+     keep refusing. Anything else is tried again in a minute. */
+  if (String(e && e.code).indexOf('permission-denied') !== -1) { window.brApp.onRoom(null); return; }
+  relistenTimer = setTimeout(() => { relistenTimer = null; if (user && code) listenTo(code); }, RELISTEN_MS);
+}
+/* The answers listener is the HOST's alone — the rules refuse it for
+   anyone else — so it follows `room.host`: attached when this browser
+   becomes the host (including by handoff), dropped when it stops being. */
+function syncAnswersListener(code, host) {
+  const mine = !!user && host === user.uid;
+  if (mine && !answersUnsub) {
+    answersUnsub = F.onSnapshot(F.collection(db, 'rooms', code, 'answers'), (q) => {
+      const list = [];
+      q.forEach((d) => list.push(Object.assign({ uid: d.id }, plain(d.data()))));
+      window.brApp.onAnswers(list);
+    }, (e) => { console.warn('answers', e); if (answersUnsub) { answersUnsub(); answersUnsub = null; } });
+  } else if (!mine && answersUnsub) {
+    answersUnsub(); answersUnsub = null;
+    window.brApp.onAnswers([]);
+  }
+}
+function listenTo(code) {
+  if (!user || !F || !code) return;
+  if (listening === code) return;
+  stopListening();
+  listening = code;
+  unsubs.push(F.onSnapshot(roomRef(code), (s) => {
+    if (s.metadata.hasPendingWrites) return;
+    if (!s.exists()) { window.brApp.onRoom(null); return; }
+    const r = plain(s.data());
+    roomExpiresMs = Number(r.expiresAt) || 0;
+    roomHost = r.host;
+    syncAnswersListener(code, r.host);
+    window.brApp.onRoom(r);
+  }, onListenError));
+  unsubs.push(F.onSnapshot(F.collection(db, 'rooms', code, 'players'), (q) => {
+    if (q.metadata.hasPendingWrites) return;
+    const list = [];
+    q.forEach((d) => {
+      const p = d.data();
+      /* The clock offset, for free: my own seenAt came back resolved by the
+         server, and I know when I sent it. Half a round trip out — it was
+         resolved partway through — and that is fine for a countdown. */
+      if (d.id === user.uid && sentAt && p.seenAt && typeof p.seenAt.toMillis === 'function') {
+        window.brApp.onOffset(p.seenAt.toMillis() - sentAt);
+        sentAt = 0;
+      }
+      list.push(Object.assign({ uid: d.id }, plain(p)));
+    });
+    window.brApp.onPlayers(list);
+  }, onListenError));
+}
+
+/* ── The eleven calls ───────────────────────────────────────────────────────── */
+function needUser() { if (!user) throw Object.assign(new Error('not signed in'), { code: 'unauthenticated' }); }
+function playerDoc(nick, joinedAt, hue) {
+  sentAt = Date.now();
+  return { nick: nick, joinedAt: joinedAt, seenAt: F.serverTimestamp(), ansR: 0, hue: hue, expiresAt: ts(roomExpiresMs) };
+}
+async function create(nick) {
+  needUser();
+  const t = Date.now();
+  roomExpiresMs = t + 6 * 3600000;
+  /* A plain setDoc: if the code already names a room, the write is an UPDATE
+     and the rules refuse it (rev 0 is never old + 1, and the host is somebody
+     else) — so a collision is a permission-denied, and the next code is
+     tried. Five tries is one in 32^30. */
+  let code = '';
+  for (let i = 0; i < 5; i++) {
+    code = window.brApp.randomCode();
+    try {
+      await F.setDoc(roomRef(code), { host: user.uid, rev: 0, schema: window.brApp.schema, createdAt: t,
+        expiresAt: ts(roomExpiresMs), phase: 'lobby', kind: null, game: {}, scores: {}, feed: [] });
+      break;
+    } catch (e) {
+      if (i === 4 || String(e && e.code).indexOf('permission-denied') === -1) throw e;
+    }
+  }
+  await F.setDoc(playerRef(code, user.uid), playerDoc(nick, t, Math.floor(Math.random() * 12)));
+  return code;
+}
+/* Joining reads the room (refused if it has ended), then the roster once —
+   to keep an existing record's arrival time and hue on a rejoin, and to give
+   a nickname somebody else already wears a digit. */
+async function join(code, nick) {
+  needUser();
+  let snap;
+  try { snap = await F.getDoc(roomRef(code)); }
+  catch (e) { if (String(e && e.code).indexOf('permission-denied') !== -1) return 'expired'; throw e; }
+  if (!snap.exists()) return 'not-found';
+  const r = plain(snap.data());
+  roomExpiresMs = Number(r.expiresAt) || 0;
+  if (roomExpiresMs <= Date.now()) return 'expired';
+  const roster = await F.getDocs(F.collection(db, 'rooms', code, 'players'));
+  let mine = null; const taken = new Set(); let count = 0;
+  roster.forEach((d) => { count++; if (d.id === user.uid) mine = d.data(); else taken.add(String(d.data().nick || '').toLowerCase()); });
+  if (!mine && count >= 32) return 'full';
+  let name = nick, n = 2;
+  while (taken.has(name.toLowerCase())) { name = nick.slice(0, 18) + ' ' + n; n++; }
+  await F.setDoc(playerRef(code, user.uid), playerDoc(name, mine ? Number(mine.joinedAt) || Date.now() : Date.now(),
+    mine ? Number(mine.hue) || 0 : Math.floor(Math.random() * 12)));
+  return 'joined';
+}
+/* The host's transaction: read, check the seat is still mine, write rev + 1. */
+async function push(patch) {
+  needUser();
+  const code = listening;
+  return F.runTransaction(db, async (tx) => {
+    const s = await tx.get(roomRef(code));
+    if (!s.exists()) throw Object.assign(new Error('room gone'), { code: 'br/gone' });
+    const cur = s.data();
+    if (cur.host !== user.uid && !(patch.host === user.uid)) throw Object.assign(new Error('not the host'), { code: 'br/not-host' });
+    const rev = (Number(cur.rev) || 0) + 1;
+    tx.update(roomRef(code), Object.assign(forCloud(patch), { rev: rev }));
+    return rev;
+  });
+}
+async function answer(r, v) {
+  needUser();
+  const code = listening;
+  sentAt = Date.now();
+  const b = F.writeBatch(db);
+  b.set(answerRef(code, user.uid), { r: r, v: v, at: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
+  b.update(playerRef(code, user.uid), { ansR: r, seenAt: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
+  await b.commit();
+}
+async function heartbeat() {
+  needUser();
+  sentAt = Date.now();
+  await F.updateDoc(playerRef(listening, user.uid), { seenAt: F.serverTimestamp(), expiresAt: ts(roomExpiresMs) });
+}
+async function claimHost() {
+  needUser();
+  const code = listening;
+  return F.runTransaction(db, async (tx) => {
+    const s = await tx.get(roomRef(code));
+    if (!s.exists()) throw Object.assign(new Error('room gone'), { code: 'br/gone' });
+    const rev = (Number(s.data().rev) || 0) + 1;
+    tx.update(roomRef(code), { host: user.uid, rev: rev });
+    return rev;
+  });
+}
+async function extend(ms) {
+  roomExpiresMs = ms;
+  return push({ expiresAt: ms });
+}
+/* Leaving: hand the room on if asked, delete my two documents, close the
+   room if I was the last one out. Best effort on every line — a room that
+   is already gone refuses nothing worth reporting. */
+async function leave(opts) {
+  if (!user || !listening) return;
+  const code = listening;
+  const o = opts || {};
+  if (o.handTo) { try { await push({ host: o.handTo }); } catch (e) { console.warn('handoff on leave', e); } }
+  try { await F.deleteDoc(answerRef(code, user.uid)); } catch (e) { /* there may be none */ }
+  try { await F.deleteDoc(playerRef(code, user.uid)); } catch (e) { /* already gone */ }
+  if (o.closeRoom) { try { await F.deleteDoc(roomRef(code)); } catch (e) { /* somebody else took it */ } }
+}
+
+window.brCloud = {
+  on: cloudOn,
+  uid: () => (user ? user.uid : null),
+  create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
+  claimHost: claimHost, extend: extend, leave: leave,
+  listen: listenTo, stop: stopListening,
+};
+updateNote();
+if (cloudOn) {
+  init().catch((e) => { console.warn('Cloud unavailable:', e); window.brCloud.on = false; window.brApp.onError(e); });
+} else if (!inFrame && !window.brHalted) {
+  /* The ordinary visit with the config still null, or a halted page. Nothing
+     to do; the home card has already said so. */
+}
 </script>
 
 <!-- ── The offline worker ────────────────────────────────────────────────────

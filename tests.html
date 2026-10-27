@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 94;
+const EXPECTED = 111;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -212,7 +212,19 @@ async function runAsync() {
     H.__plantRoom(null);
     H.__plantLocal(FIXTURE_LOCAL);
     drawn['view:home'] = doc.getElementById('homeCard').textContent.trim().length;
-    /* M1-SMOKE-SLOT */
+    /* A room, through every phase it has, with the suite's own fixture. */
+    H.__setMe(U.host);
+    H.__plantRoom(fixtureRoom());
+    H.__plantPlayers(fixturePlayers());
+    drawn['view:lobby'] = doc.getElementById('roomView').textContent.trim().length;
+    H.__setMe(U.b);
+    drawn['view:lobby-as-player'] = doc.getElementById('roomView').textContent.trim().length;
+    H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', scores: { [U.b]: 150 } }));
+    drawn['view:results'] = doc.getElementById('roomView').textContent.trim().length;
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'poker' }));
+    drawn['view:unknown-game'] = doc.getElementById('roomView').textContent.trim().length;
+    /* M2-SMOKE-SLOT */
+    H.__setMe(null);
     H.__plantRoom(null);
     const dialogs = [...doc.querySelectorAll('dialog')].filter((d) => d.id);
     for (const d of dialogs) {
@@ -618,8 +630,8 @@ function define() {
     const seen = new Set();
     for (let i = 0; i < 300; i++) seen.add(H.randomCode());
     ok(seen.size > 295, 'and they do not repeat — ' + seen.size + ' distinct of 300');
-    ok(/crypto\.getRandomValues/.test(stripComments(APP_SRC)) && !/Math\.random/.test(stripComments(APP_SRC)),
-       'drawn from crypto, never Math.random');
+    const fn = (stripComments(APP_SRC).match(/function randomCode\(\)[\s\S]*?\n\}/) || [''])[0];
+    ok(/crypto\.getRandomValues/.test(fn) && !/Math\.random/.test(fn), 'drawn from crypto, never Math.random');
   });
   t('cleanCode upper-cases and strips, and corrects nothing', () => {
     eq(H.cleanCode(' ab-cd ef '), 'ABCDEF');
@@ -1092,7 +1104,199 @@ function define() {
     const table = src.slice(at, src.indexOf('\n};', at));
     ok(at > 0 && !/\besc\(|\broom\.\w|\bplayers\[|\blocal\.\w|\$\(/.test(table), 'the table reads nothing from the data — every body is a literal');
   });
-  /* M1-TESTS-SLOT */
+
+  group('the lobby: roster, dots, host, expiry');
+  /* The fixtures' clock is T0; the frame's corrected clock is moved there for
+     the lobby tests and put back after, so "online" means what the fixture says. */
+  const inLobby = (asUid) => { H.__setOffset(T0 - Date.now()); H.__setMe(asUid); H.__plantRoom(fixtureRoom()); H.__plantPlayers(fixturePlayers()); };
+  const home = () => { H.__plantRoom(null); H.__setMe(null); H.__setOffset(0); };
+  t('a planted room swaps the home card for the room, and back', () => {
+    const D = W.document;
+    inLobby(U.host);
+    ok(D.getElementById('homeCard').hidden && !D.getElementById('roomView').hidden, 'the room is on');
+    ok(!D.getElementById('inviteBtn').hidden, 'and the header offers Invite');
+    home();
+    ok(!D.getElementById('homeCard').hidden && D.getElementById('roomView').hidden, 'home again');
+    ok(D.getElementById('inviteBtn').hidden, 'with nothing to invite anyone to');
+  });
+  t('the roster is in arrival order, with a dot per player, a host badge and "you"', () => {
+    try {
+    const D = W.document;
+    inLobby(U.b);
+    const rows = [...D.querySelectorAll('.roster li')];
+    eq(rows.map((li) => li.getAttribute('data-uid')), [U.host, U.b, U.c], 'arrival order');
+    eq(rows.filter((li) => li.querySelector('.dot.on')).length, 2, 'Ada and Ben are online; Cat (ten minutes quiet) is not');
+    eq(rows.map((li) => li.querySelector('.sr-only').textContent), ['online', 'online', 'away'], 'and the word is there for a screen reader');
+    ok(rows[0].querySelector('.pill') && /host/.test(rows[0].textContent), 'the host is badged');
+    ok(/\(you\)/.test(rows[1].textContent) && !/\(you\)/.test(rows[0].textContent), 'and I am marked, once');
+    ok(/2 of 3 online/.test(D.getElementById('roomView').textContent), 'the count says so too');
+    const av = rows[1].querySelector('.avatar');
+    ok(av && av.classList.contains('h2') && av.textContent === 'BE', 'an avatar is the initials on the hue’s series class');
+    } finally { home(); }
+  });
+  t('a nickname from another browser is escaped on the way to the roster', () => {
+    try {
+    const D = W.document;
+    H.__setMe(U.host);
+    H.__plantRoom(fixtureRoom());
+    H.__plantPlayers([{ uid: U.host, nick: '<img src=x onerror=alert(1)>', joinedAt: 1, seenAt: T0, hue: 0 }]);
+    ok(!D.querySelector('.roster img'), 'no element was created from the name');
+    ok(D.querySelector('.roster .who').textContent.indexOf('<img') === 0, 'it reads as text');
+    } finally { home(); }
+  });
+  t('the host sees the picker and Extend; a player sees who they are waiting for', () => {
+    try {
+    const D = W.document;
+    inLobby(U.host);
+    ok(D.getElementById('extendBtn'), 'the host may add two hours');
+    ok(D.getElementById('leaveBtn'), 'and may leave');
+    inLobby(U.b);
+    ok(!D.getElementById('extendBtn'), 'a player may not extend');
+    ok(/Waiting for Ada/.test(D.getElementById('roomView').textContent), 'and is told whose move it is');
+    ok(D.getElementById('leaveBtn'), 'but may leave');
+    } finally { home(); }
+  });
+  t('Extend is withheld at the twelve-hour limit', () => {
+    try {
+    const D = W.document;
+    H.__setMe(U.host);
+    H.__plantRoom(fixtureRoom({ createdAt: T0 - 11 * 3600000, expiresAt: T0 + 3600000 }));
+    H.__plantPlayers(fixturePlayers());
+    ok(!D.getElementById('extendBtn'), 'twelve hours from creation is the rules’ ceiling');
+    ok(/twelve-hour limit/.test(D.getElementById('roomView').textContent), 'and the line says so');
+    } finally { home(); }
+  });
+  t('the expiry reads in minutes, never seconds', () => {
+    eq(H.fmtLeft(5 * 3600000 + 12 * 60000), '5h 12m');
+    eq(H.fmtLeft(48 * 60000 + 30000), '49m', 'rounded up — a room that ends in 48:30 has 49 minutes, not 48');
+    eq(H.fmtLeft(20000), 'under a minute');
+    eq(H.fmtLeft(-1), 'ended');
+  });
+  t('a player is told when the host’s browser has stopped moving the game on', () => {
+    try {
+    const D = W.document;
+    H.__setOffset(T0 - Date.now());
+    H.__setMe(U.b);
+    H.__plantRoom(fixtureRoom({ phase: 'play', kind: 'poker', game: { step: 'ask', stepAt: T0 - 60000, stepMs: 20000, round: 1 } }));
+    H.__plantPlayers(fixturePlayers());
+    /* The question opened a minute before T0 and ran 20 s: forty seconds overdue. */
+    ok(/Waiting for the host/.test(D.getElementById('roomView').textContent), 'ten seconds overdue says so');
+    } finally { home(); }
+  });
+
+  group('entering and leaving, by the demo transport');
+  t('the demo room opens with invented players named for what they show, and leaves without a trace', async () => {
+    const D = W.document, realSave = W.save;
+    W.save = () => {};
+    try {
+      H.__plantLocal(FIXTURE_LOCAL);
+      D.getElementById('nickBox').value = 'Ada';
+      D.getElementById('demoBtn').click();
+      const started = Date.now();
+      while (!H.__room() && Date.now() - started < 5000) await new Promise((r) => setTimeout(r, 30));
+      ok(H.__room(), 'a room arrived');
+      eq(H.__room().host, H.DEMO_ME, 'and I am its host');
+      eq(H.__players().length, H.DEMO_PLAYERS.length + 1, 'with the invented players and me');
+      ok(H.DEMO_PLAYERS.every((p) => /\(/.test(p.nick)), 'each named for the case it shows');
+      ok(H.DEMO_PLAYERS.some((p) => p.awayMs > 0), 'one of them is away, so the grey dot is seen');
+      ok(/^DEMO/.test(H.__local().code), 'the demo’s code is the demo’s');
+      ok(D.querySelectorAll('.roster li').length === H.DEMO_PLAYERS.length + 1, 'and the roster draws them');
+      D.getElementById('leaveBtn').click();
+      const left = Date.now();
+      while (H.__room() && Date.now() - left < 5000) await new Promise((r) => setTimeout(r, 30));
+      ok(!H.__room(), 'leaving empties the room');
+      eq(H.__local().code, '', 'and forgets the code');
+      ok(!H.__local().recent.some((r) => /^DEMO/.test(r.code)), 'the demo never reaches the recent list');
+    } finally { W.save = realSave; home(); H.__plantLocal(FIXTURE_LOCAL); }
+  });
+
+  group('the invite link and arriving by one');
+  t('joinLink is this page plus #join=CODE, and parseJoinHash reads it leniently', () => {
+    const link = H.joinLink('ABCDEF');
+    ok(/#join=ABCDEF$/.test(link), 'the fragment');
+    eq(link.indexOf('#join=ABCDEF'), link.length - 12, 'and it is the last thing — a share sheet glues words onto the end');
+    eq(H.parseJoinHash('#join=ABCDEF'), 'ABCDEF');
+    eq(H.parseJoinHash('#join=abcdef'), 'ABCDEF', 'case-folded');
+    eq(H.parseJoinHash('#join=ABCDEF%20Join%20me'), 'ABCDEF', 'words glued on are ignored');
+    eq(H.parseJoinHash('#JOIN=ABCDEF'), 'ABCDEF', 'the prefix is case-insensitive');
+    eq(H.parseJoinHash('#join=ABCDE0'), null, 'a 0 is not in the alphabet');
+    eq(H.parseJoinHash('#join=ABCDEFG'), null, 'seven characters is not a code');
+    eq(H.parseJoinHash('#share=ABCDEF'), null, 'the wrong prefix is nothing');
+    eq(H.parseJoinHash(''), null);
+  });
+  t('a join link’s code is taken off the address and put in the box', async () => {
+    const f = document.createElement('iframe');
+    f.setAttribute('data-br-tests', '');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:absolute;left:-9999px;width:1000px;height:800px;border:0';
+    await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?j=' + Date.now() + '#join=QRSTUV'; document.body.appendChild(f); });
+    try {
+      const FW = f.contentWindow;
+      eq(FW.location.hash, '', 'the fragment is gone from the address');
+      eq(FW.document.getElementById('joinCode').value, 'QRSTUV', 'and the code is in the box');
+    } finally { f.remove(); }
+  });
+
+  group('the cloud contract');
+  t('the classic script and the module meet on brApp and brCloud', () => {
+    const src = stripComments(APP_SRC);
+    ['onAuth', 'onRoom', 'onPlayers', 'onAnswers', 'onOffset', 'onError'].forEach((k) =>
+      ok(new RegExp('  ' + k + ': ').test(src), 'brApp.' + k));
+    ['create', 'join', 'push', 'answer', 'heartbeat', 'claimHost', 'extend', 'leave', 'listen', 'stop'].forEach((k) =>
+      ok(new RegExp('\\b' + k + ': ' + k + '\\b').test(src) || new RegExp(k + ': ' + (k === 'listen' ? 'listenTo' : k === 'stop' ? 'stopListening' : k)).test(src), 'brCloud.' + k));
+    ok(/transport\(\)/.test(src), 'and the app never names either directly in the room code');
+  });
+  t('every room write goes through a transaction with rev + 1, and only the host pushes', () => {
+    const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+    ok(/F\.runTransaction\(db, async \(tx\) => \{\s*const s = await tx\.get\(roomRef\(code\)\);/.test(mod), 'push reads the room inside the transaction');
+    ok(/if \(cur\.host !== user\.uid && !\(patch\.host === user\.uid\)\) throw/.test(mod), 'and refuses if the seat is not mine');
+    ok(/tx\.update\(roomRef\(code\), Object\.assign\(forCloud\(patch\), \{ rev: rev \}\)\)/.test(mod), 'and writes rev + 1');
+    ok(/if \(s\.metadata\.hasPendingWrites\) return;/.test(mod), 'a local echo is never adopted as the room');
+    ok(/stepAt' && v === 'now'\) out\[k\] = F\.serverTimestamp\(\)/.test(mod), 'stepAt is the server’s clock, never the host’s');
+    ok(/seenAt: F\.serverTimestamp\(\)/.test(mod) && /at: F\.serverTimestamp\(\)/.test(mod), 'and so are presence and an answer’s time');
+  });
+  t('the host loop pushes once and waits for its snapshot', () => {
+    const src = stripComments(APP_SRC);
+    ok(/if \(pushInFlight\) return;/.test(src), 'one push at a time');
+    ok(/if \(pendingRev && room\.rev < pendingRev && Date\.now\(\) - pendingSince < 10000\) return;/.test(src),
+       'and nothing more until the room comes back at the new rev — step() is pure on the room it sees');
+    ok(/g\.step\(room, \{ answers: answers, players: players, now: t \}\)/.test(src), 'step() is called with the corrected clock');
+  });
+  t('a stale host is replaced by the longest-present online player, once', () => {
+    const src = stripComments(APP_SRC);
+    ok(/hostIsStale\(players, room\.host, t\) && nextHost\(players, t\) === me && Date\.now\(\) - claimAskedAt > 30000/.test(src),
+       'only the one player who should, and not every tick');
+  });
+  t('the heartbeat is every 90 s, and any other write counts as one', () => {
+    const src = stripComments(APP_SRC);
+    ok(/if \(Date\.now\(\) - lastWriteAt < HEARTBEAT_MS\) return;/.test(src), 'skipped while something else has written');
+    ['enterRoom', 'pushPatch', 'heartbeat'].forEach((fn) =>
+      ok(new RegExp('function ' + fn + '[\\s\\S]*?noteWrite\\(\\);').test(src), fn + ' notes its write'));
+  });
+  t('leaving as the host hands the room on, or closes it when alone', () => {
+    const src = stripComments(APP_SRC);
+    ok(/handTo = nextHost\(others, now\(\)\);\s*closeRoom = !handTo;/.test(src), 'the next online player, else close');
+    const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+    ok(/if \(o\.handTo\) \{ try \{ await push\(\{ host: o\.handTo \}\); \}/.test(mod), 'the module pushes the handoff first');
+    ok(/if \(o\.closeRoom\) \{ try \{ await F\.deleteDoc\(roomRef\(code\)\); \}/.test(mod), 'and deletes the room when told to');
+  });
+  t('a room written by a newer build halts the page, for everyone in it', async () => {
+    const f = document.createElement('iframe');
+    f.setAttribute('data-br-tests', '');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:absolute;left:-9999px;width:1000px;height:800px;border:0';
+    await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?halt=' + Date.now(); document.body.appendChild(f); });
+    try {
+      const FW = f.contentWindow;
+      FW.__brTestHooks.__demo(true);
+      let threw = false;
+      try { FW.brApp.onRoom(fixtureRoom({ schema: 99 })); } catch (e) { threw = true; }
+      ok(threw, 'the halt throws');
+      ok(FW.brHalted === true, 'and raises the flag the module and the worker read');
+      ok(/Newer Version/.test(FW.document.body.textContent), 'and the card is on screen');
+    } finally { f.remove(); }
+  });
+
   /* M2-TESTS-SLOT */
 }
 

@@ -15,31 +15,42 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
-**Milestone 0 — the scaffold (27 October 2026).** The page runs, fully local, with the
-family's chrome and guards in place:
+**Milestone 1 — the lobby (27 October 2026).** A room you can actually be in:
 
-- **The home card.** A nickname and two doors: *Start a Room* and *Join* with a six-letter
-  code. Recent codes come back as buttons. Until the cloud is connected (see below) both
-  doors are disabled and the card says why.
-- **Room codes.** Six characters from an alphabet with no O, 0, I or 1 — the same one League
-  Night reads out over a phone — drawn from `crypto.getRandomValues`. Knowing the code is the
-  only way into a room: the rules never let anyone list rooms.
-- **The data guards.** Everything that will arrive from another browser — the room, the
-  player list, the answers — comes through an allowlist that rebuilds rather than merges,
-  with every uid shape-checked, every string capped and every list bounded. A room written
-  by a newer build halts the page rather than being quietly rewritten by an old host.
-- **`firestore.rules`**, argued clause by clause: anonymous sign-in, the code as the read
-  capability, the host as the only writer of the room by `rev + 1` transactions, players
-  writing only their own documents with server-timestamp sentinels, and a handoff clause
-  for a host who goes quiet.
-- **The family's furniture:** the four-theme palette with Auto as the default, the one-line
-  header, Back Up & Restore (your nickname and custom packs), *Forget This Browser*, the
-  help dot, the toast, the offline worker, the install manifest, and a 94-test suite with a
-  floor.
+- **Start or join.** *Start a Room* opens a room with a six-letter code and makes you its
+  host; *Join* takes a code. Your nickname is remembered, and a reload drops you straight
+  back into the room you were in. A nickname somebody else is already wearing gets a digit.
+- **Who's here.** A roster in arrival order with an online dot per player — green while
+  that browser has written in the last four minutes, grey after — the host badged, you
+  marked. Every player's browser writes a heartbeat every 90 seconds; any other write
+  counts as one.
+- **Invite.** The ↗ Invite button in the header (and on the room card) shows the code big
+  enough to read out over the call and a link — `…/break-room/#join=CODE` — with Copy and,
+  where the browser has it, Share. Opening the link drops you straight into the room if
+  you have a nickname saved, or onto the home card with the code filled in if not.
+- **Six hours, extendable.** The room card counts down to the expiry in minutes; the host
+  can add two hours at a time up to twelve, and the button withdraws itself at the limit.
+- **Leave.** As a player, your records go. As the host with others online, the room is
+  handed to whoever has been there longest first; as the last one out, the room is closed.
+- **Host handoff.** If the host's browser goes quiet for three minutes, the longest-present
+  online player takes the seat automatically, and a player whose host has stopped moving a
+  game on is told so after ten seconds rather than left with a frozen countdown.
+- **A demo room.** *Try a Demo Room* on the home card opens a room of invented players —
+  one of them away — so the lobby can be seen with no cloud, no console and no second
+  browser. Nothing in it is saved.
 
-**Coming next:** the lobby with online dots, heartbeat and host handoff (milestone 1), then
-trivia with four embedded packs and a custom-pack editor (milestone 2), then drawing &
-guess, icebreakers and Codenames.
+**Milestone 0 — the scaffold (27 October 2026).** The family's chrome and guards: the
+four-theme palette with Auto as the default, the one-line header, Back Up & Restore (your
+nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
+worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
+allowlists for everything that arrives from another browser, `firestore.rules` argued
+clause by clause, and a suite with a floor (111 tests as of milestone 1).
+
+**Until the cloud is connected** (the checklist below) both doors on the home card are
+disabled and the card says why; the demo room is the only room there is.
+
+**Coming next:** trivia with four embedded packs and a custom-pack editor (milestone 2),
+then drawing & guess, icebreakers and Codenames.
 
 ## How a Room Works
 
