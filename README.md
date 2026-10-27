@@ -17,6 +17,13 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
+**Accessibility and slow connections (27 October 2026).** Checked with axe on every screen
+in all four themes (no issues), and by keyboard alone through the lobby and a game: focus now
+stays on the answer or button you were on when the room updates, instead of jumping to the
+top of the page. The drawing game was tested on a throttled "Slow 3G" connection and through
+a 20-second dropout: strokes arrive in order, a player who reconnects catches up within
+seconds, and anyone joining late sees the whole picture.
+
 **Quit, pause and end early (27 October 2026).**
 
 - **Quit Game** — any player, the host included, can step out of a game on the room card.

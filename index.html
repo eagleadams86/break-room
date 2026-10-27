@@ -2345,13 +2345,12 @@ GAMES.trivia = {
               else if (answered === i) { cls = ' wrong'; tag = 'yours'; }
               if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' answer' : ' answers');
             } else if (answered === i) { cls = ' mine'; tag = 'your answer'; }
-            /* aria-label as well as the text: the answer and its tag are two
-               spans, and some readers of the tree (the harness among them) name
-               a button only from a label — so the label says what the button
-               says, and the tag rides along after a comma. */
-            return '<button type="button" data-ans="' + i + '" class="' + cls.trim() + '"' + ((reveal || haveAnswered) ? ' disabled' : '')
-              + ' aria-label="' + esc(a + (tag ? ', ' + tag : '')) + '">'
-              + '<span>' + esc(a) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+            /* The name is the button's own text — the answer, then its tag
+               after a comma only a screen reader hears. No aria-label: one
+               that differs from the text on screen leaves a voice-control
+               user nothing to say (WCAG 2.5.3; the 2026-10-27 axe pass). */
+            return '<button type="button" data-ans="' + i + '" class="' + cls.trim() + '"' + ((reveal || haveAnswered) ? ' disabled' : '') + '>'
+              + '<span>' + esc(a) + '</span>' + (tag ? '<span class="sr-only">, </span><span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
           }).join('') + '</div>';
     }
     let line;
@@ -3515,7 +3514,7 @@ GAMES.ice = {
   /* ── What a player sees ────────────────────────────────────────────────
      Like the drawing card, the stage REFRESHES IN PLACE between steps: the
      two-truths form is three boxes, and a wholesale redraw on every roster
-     snapshot would keep only the focused one (keepTyping) and empty the
+     snapshot would keep only the focused one (keepFocus) and empty the
      other two. Keyed on mode, step, round, who is looking and "have I
      answered" — anything that changes what the body says. */
   key(r, who) {
@@ -4058,9 +4057,12 @@ GAMES.codenames = {
       const tagHtml = col ? '<span class="cn-l">' + CN_COL_NAMES[col] + '</span><span class="cn-s">' + CN_COL_SHORT[col] + '</span>'
           + (more ? '<span class="cn-more">' + more + '</span>' : '') : esc(tag);
       const open = can && !turned;
-      return '<button type="button" data-cn-pick="' + i + '" class="' + cls.trim() + '"' + (open ? '' : ' disabled')
-        + ' aria-label="' + esc(w + (tag ? ', ' + tag : '')) + '"><span>' + esc(w) + '</span>'
-        + (tag ? '<span class="tag">' + tagHtml + '</span>' : '') + '</button>';
+      /* Named by its own text, word first (WCAG 2.5.3): the tag a screen
+         reader hears is the full one, after a comma; the painted tag — whose
+         one-letter form shows on a narrow screen — is hidden from it. */
+      return '<button type="button" data-cn-pick="' + i + '" class="' + cls.trim() + '"' + (open ? '' : ' disabled') + '>'
+        + '<span>' + esc(w) + '</span>'
+        + (tag ? '<span class="sr-only">, ' + esc(tag) + '</span><span class="tag" aria-hidden="true">' + tagHtml + '</span>' : '') + '</button>';
     }).join('') + '</div>';
   },
   logHtml(r) {
@@ -4192,12 +4194,14 @@ function sendCnPick(r, v) {
    home card is DERIVED on every render, never latched — leaving a room is what
    brings it back, with no special case. */
 function render() {
+  const keep = keepFocus();
   const inRoom = !!room;
   document.getElementById('homeCard').hidden = inRoom;
   document.getElementById('houseCard').hidden = inRoom;
   document.getElementById('roomView').hidden = !inRoom;
   document.getElementById('inviteBtn').hidden = !inRoom;
   if (inRoom) renderRoom(); else renderHome();
+  keep();
 }
 
 /* The home card's live parts: the nickname box is filled from storage only
@@ -4453,9 +4457,8 @@ function renderRoom() {
   if (g && g.refresh && $('roomSide') && g.refresh(room, me, playing(), gameNow())) {
     $('overdueSlot').innerHTML = overdueHtml;
     $('roomSide').innerHTML = renderRoomCard() + renderRoster();
-    return;
+    return;   /* render() puts focus back, as for a full redraw */
   }
-  const keep = keepTyping();
   let main;
   if (out) main = renderLobby();
   else if (room.phase === 'play') main = renderPlay();
@@ -4464,21 +4467,53 @@ function renderRoom() {
   $('roomView').innerHTML = '<div class="room"><div class="mainc"><div id="overdueSlot">' + overdueHtml + '</div>'
     + main + '</div><div class="side" id="roomSide">' + renderRoomCard() + renderRoster() + '</div></div>';
   if (g && g.mount) g.mount(room, me);
-  keep();
 }
-/* A text box inside the room survives a wholesale redraw: its value, caret
-   and focus are read before and put back after, if the new view has a box
-   with the same id. */
-function keepTyping() {
+/* FOCUS SURVIVES A REDRAW (the 2026-10-27 keyboard walk). The room is
+   rebuilt on every snapshot, so the focused control is replaced several
+   times a minute — and focus fell to <body>, the top of the page: a
+   keyboard or screen-reader user sitting on an answer was thrown back to
+   the start whenever somebody else answered. So the focused control is
+   remembered by WHAT it is — its id, or the data attribute that says which
+   answer, card or player it is — and the same control in the new markup
+   gets focus back (a text box keeps its value and caret too). If the
+   control is gone or can no longer take focus (Start became the game; an
+   answered button is disabled; the home card gave way to the room), focus
+   lands on the new view's heading instead, `tabindex=-1` so it never joins
+   the Tab order; the ring there shows only after a keyboard press, because
+   that is when :focus-visible matches a programmatic focus. Only focus that
+   WAS in the home card or the room is moved — never a dialog's, never the
+   header's. */
+const FOCUS_KEYS = ['data-ans', 'data-cn-pick', 'data-ice-pick', 'data-make-host', 'data-house-board', 'data-house-open',
+  'data-help', 'data-rejoin', 'data-word', 'data-colour', 'data-width', 'data-key', 'data-delpack'];
+function focusKey(el) {
+  if (el.id) return '#' + CSS.escape(el.id);
+  for (const a of FOCUS_KEYS) if (el.hasAttribute(a)) return '[' + a + '="' + CSS.escape(el.getAttribute(a)) + '"]';
+  return null;
+}
+function landOn(h) {
+  if (!h) return;
+  h.setAttribute('tabindex', '-1');
+  h.focus({ preventScroll: false });
+}
+function keepFocus() {
   const el = document.activeElement;
-  if (!el || el.tagName !== 'INPUT' || !el.id || !$('roomView').contains(el)) return () => {};
-  const id = el.id, v = el.value, s = el.selectionStart, e = el.selectionEnd;
+  const zone = el && el !== document.body && (['roomView', 'homeCard', 'houseCard'].find((z) => $(z) && $(z).contains(el)) || null);
+  if (!zone) return () => {};
+  const key = focusKey(el);
+  const text = el.tagName === 'INPUT' && el.type === 'text';
+  const v = text ? el.value : null, s0 = text ? el.selectionStart : 0, s1 = text ? el.selectionEnd : 0;
   return () => {
-    const box = $(id);
-    if (!box) return;
-    box.value = v;
-    box.focus({ preventScroll: true });
-    try { box.setSelectionRange(s, e); } catch (ex) { /* not a text box after all */ }
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement !== el && document.contains(document.activeElement)) return;
+    const again = key ? document.querySelector(key) : null;
+    if (again && !again.disabled && again.offsetParent !== null) {
+      if (again === document.activeElement) return;
+      if (text && again.tagName === 'INPUT') again.value = v;
+      again.focus({ preventScroll: true });
+      if (text) { try { again.setSelectionRange(s0, s1); } catch (ex) { /* not a text box after all */ } }
+      return;
+    }
+    if (el.isConnected && !el.disabled && el.offsetParent !== null) return;   /* untouched by the redraw */
+    landOn(room ? $('roomView').querySelector('.mainc h2') : $('homeCard').querySelector('h2'));
   };
 }
 

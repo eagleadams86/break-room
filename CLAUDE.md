@@ -95,8 +95,8 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 239 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
-+2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house below). **A deleted house lingered on members' cards
+**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 241 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below). **A deleted house lingered on members' cards
 (fixed 2026-10-27):** `deleteHouse` can only edit the FOUNDER's `users` doc, so each member's
 `watchHouses` listener drops the house from its own list when the server (not the cache)
 says it is gone.
@@ -398,3 +398,32 @@ Firebase console steps are a numbered checklist in the README and need Charles.
   single-file apps. A downloaded copy cannot host a room (the cloud answers only the live
   site and `localhost:8026`), so a release zip is waste. The 2026-10-27 release and tag were
   deleted. A milestone ships when it is merged and the Pages deploy is confirmed.
+
+
+## Accessibility and slow-network checks (2026-10-27)
+
+**axe** (injected by Playwright from the scratchpad, never in the repo): 21 screens — home,
+Back Up, help, privacy, lobby, invite, custom packs, trivia question/paused/reveal/results,
+sitting out, drawing ×2 + results, icebreakers + results, Codenames teams/board ×2/results —
+in all four themes: **0 violations** (~3,500 passes). The one finding fixed: answer buttons and
+Codenames cards carried an `aria-label` that differed from their text (WCAG 2.5.3). They are
+now **named by their own text** — word first, then a `.sr-only` comma (+ the full colour on a
+card, whose painted one-letter tag is `aria-hidden`). Don't put an aria-label back on them.
+
+**Keyboard walk:** every Tab stop on home, lobby, a trivia question and results has a ring
+≥3:1 in all four themes; dialogs take focus, close on Esc and return it. The finding: **every
+snapshot rebuilds the room, and focus fell to `<body>`** — a keyboard user on an answer was
+sent to the top whenever someone else answered. `keepFocus()` (in `render()`) now puts focus
+back on the same control (id or a FOCUS_KEYS data attribute) or, if it is gone/disabled, on
+the new view's `h2` (`tabindex=-1`). A new data-attribute control that can hold focus across a
+snapshot belongs in `FOCUS_KEYS`.
+
+**Slow 3G drawing** (real cloud, CDP throttle 2 s latency / 50 KB/s, applied BEFORE page load —
+a throttle switched on after load misses the already-open Firestore stream): the throttled
+watcher matched the drawer ~0.5 s after the last stroke; after a full offline drop of 8–20 s it
+caught up **5.1 s after reconnecting**, every time (4 runs); two late joiners (one on Slow 3G)
+got the whole picture with the same colour on top at both crossings. Compare canvases by ink
+count + crossing colour with a ±1 tolerance — replayed segments anti-alias one unit off the
+drawer's live strokes, and an exact-pixel check reads that as failure. While OFFLINE the
+Firestore SDK tries to load `www.google.com/images/cleardot.gif` (a connectivity probe) and
+the CSP blocks it: console noise only, reconnection is unaffected — do not widen `img-src`.

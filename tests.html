@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 239;
+const EXPECTED = 241;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2438,7 +2438,9 @@ function define() {
       const c0 = D.querySelector('[data-cn-pick="0"]'), c1 = D.querySelector('[data-cn-pick="1"]'), c24 = D.querySelector('[data-cn-pick="24"]');
       ok(/cn-b/.test(c0.className) && !/cn-key/.test(c0.className) && /Blue/.test(c0.textContent), 'a turned card is solid');
       ok(/cn-b cn-key/.test(c1.className) && /Blue · key/.test(c1.textContent), 'a face-down one shows the key, dashed', c1.className);
-      ok(/cn-x/.test(c24.className) && /Assassin/.test(c24.getAttribute('aria-label')), 'the assassin is named, not just dark');
+      ok(/cn-x/.test(c24.className) && /^, Assassin/.test(c24.querySelector('.sr-only').textContent), 'the assassin is named, not just dark');
+      ok(!c24.hasAttribute('aria-label') && c24.querySelector('.tag').getAttribute('aria-hidden') === 'true',
+         'named by its own text, word first — the one-letter painted tag is kept out of the name (WCAG 2.5.3)');
       ok([...D.querySelectorAll('[data-cn-pick]')].every((b) => b.disabled), 'and none of them can be pressed by the spymaster');
       inCn(U.b, guessing(), null);
       ok(!D.querySelector('.cn-key'), 'with no key yet, nothing is guessed at');
@@ -2794,6 +2796,36 @@ function define() {
     ok(/stepAt: g\.stepAt \? g\.stepAt \+ stood : g\.stepAt, pausedAt: 0/.test(APP_SRC), 'resuming moves the step on by however long it stood');
     H.__setMe(U.c);
     ok(!/has not moved the game on/.test(D.getElementById('overdueSlot').textContent), 'and a paused game is never “overdue”');
+    } finally { home(); }
+  });
+  t('focus survives a redraw: the same control again, or the new view’s heading', () => {
+    try {
+    const D = W.document;
+    /* The 2026-10-27 keyboard walk: every snapshot rebuilt the room and
+       focus fell to <body> — a keyboard user on an answer was sent to the
+       top of the page whenever somebody else answered. */
+    inGameAs(U.host, trivPlay());
+    H.__plantPlayers(fixturePlayers());
+    D.querySelector('[data-ans="2"]').focus();
+    H.__plantPlayers(fixturePlayers().map((p) => Object.assign({}, p, { seenAt: p.seenAt + 1 })));
+    eq(D.activeElement.getAttribute('data-ans'), '2', 'a snapshot leaves focus on the same answer');
+    ok(D.activeElement !== D.body, 'not the top of the page');
+    D.getElementById('pauseBtn').focus();
+    H.__plantRoom(trivPlay({ pausedAt: T0 }));
+    eq(D.activeElement.id, 'pauseBtn', 'a control that survives keeps focus (Pause became Resume)');
+    D.getElementById('endGameBtn').focus();
+    H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', game: { step: 'results', gid: GID } }));
+    ok(D.activeElement.matches('.mainc h2') && D.activeElement.getAttribute('tabindex') === '-1',
+       'a control that is gone hands focus to the new view’s heading, out of the Tab order');
+    } finally { home(); }
+  });
+  t('an answer is named by its own text, answer first (WCAG 2.5.3)', () => {
+    try {
+    const D = W.document;
+    inGameAs(U.host, trivPlay({ step: 'reveal', stepMs: 5000, correct: 0, counts: [1, 0, 0, 0], gained: {} }));
+    const b = D.querySelector('[data-ans="0"]');
+    ok(!b.hasAttribute('aria-label'), 'no aria-label to drift from the words on screen');
+    ok(/^[^,]+, correct · 1 answer$/.test(b.textContent), 'the answer, a comma a screen reader hears, then the tag', b.textContent);
     } finally { home(); }
   });
   t('ending early goes through each game’s own ending, so nothing private is left in the cloud', () => {
