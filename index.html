@@ -4460,6 +4460,12 @@ async function leaveRoom(reason, opts) {
     closeRoom = !handTo && !switching;
   }
   try { await t.leave({ handTo: handTo, closeRoom: closeRoom }); } catch (e) { console.warn('leave', e); }
+  /* A closed house room is cleared from the house too (best effort — a
+     guest host can't write the house, and openHouseRoom checks anyway). */
+  const h = closeRoom && !demoOn && room && room.house ? houses[room.house] : null;
+  if (h && me && h.members[me] && signedInHere() && window.brCloud.closeHouseRoom) {
+    window.brCloud.closeHouseRoom(h.id, code).catch((e) => console.warn('close house room', e));
+  }
   t.stop();
   const wasDemo = demoOn;
   room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
@@ -6246,14 +6252,21 @@ async function openHouseRoom(id, nick) {
   const s = await F.getDoc(houseRef(id));
   if (!s.exists()) return { code: null };
   const d = plain(s.data());
-  if (d.room && Number(d.roomExp) > Date.now()) return { code: d.room, created: false };
+  /* The house's word is checked against the room itself: a room closed by
+     its last player (or one the house never heard had ended) is STALE, and
+     a new room replaces it instead of sending everyone to "has ended". */
+  let stale = null;
+  if (d.room && Number(d.roomExp) > Date.now()) {
+    if (await roomAlive(d.room)) return { code: d.room, created: false };
+    stale = d.room;
+  }
   const code = await create(nick, id);
   let other = null;
   await F.runTransaction(db, async (tx) => {
     const t = await tx.get(houseRef(id));
     if (!t.exists()) return;
     const h = plain(t.data());
-    if (h.room && h.room !== code && Number(h.roomExp) > Date.now()) { other = h.room; return; }
+    if (h.room && h.room !== code && h.room !== stale && Number(h.roomExp) > Date.now()) { other = h.room; return; }
     tx.update(houseRef(id), { room: code, roomExp: roomExpiresMs, rev: (Number(h.rev) || 0) + 1 });
   });
   if (other) {
@@ -6263,6 +6276,27 @@ async function openHouseRoom(id, nick) {
     return { code: other, created: false };
   }
   return { code: code, created: true };
+}
+/* Is this room still there to join? A closed room's read is refused by the
+   rules (no document to vouch for it), which says the same as "gone". */
+async function roomAlive(code) {
+  try {
+    const r = await F.getDoc(roomRef(code));
+    return r.exists() && Number(r.data().expiresAt) > Date.now();
+  } catch (e) { if (String(e && e.code).indexOf('permission-denied') !== -1) return false; throw e; }
+}
+/* The last player out closed tonight's room: the house forgets it, so its
+   row stops saying the room is open. Only if the house still names THIS
+   room — a newer one is left alone. Members only (the rules' clause 1). */
+async function closeHouseRoom(id, code) {
+  needGoogle();
+  return F.runTransaction(db, async (tx) => {
+    const s = await tx.get(houseRef(id));
+    if (!s.exists()) return;
+    const h = plain(s.data());
+    if (h.room !== code) return;
+    tx.update(houseRef(id), { room: null, roomExp: 0, rev: (Number(h.rev) || 0) + 1 });
+  });
 }
 /* The leaderboard: `fn` is the app's PURE houseTally, run on the house as
    the transaction read it, so the difference is worked out against the
@@ -6527,6 +6561,7 @@ window.brCloud = {
   google: () => isGoogle(user), signIn: requireSignIn, signOut: signOut, saveNick: saveNick,
   watchHouses: watchHouses, createHouse: createHouse, joinHouse: joinHouse, leaveHouse: leaveHouse,
   deleteHouse: deleteHouse, openHouseRoom: openHouseRoom, tallyHouse: tallyHouse,
+  closeHouseRoom: closeHouseRoom,
 };
 updateNote();
 if (cloudOn) {

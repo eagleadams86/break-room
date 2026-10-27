@@ -95,7 +95,12 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 227.
+**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 228 (was 227; +1 for the stale-room fix
+below). **Tonight's room can go stale (fixed 2026-10-27):** the last player out deletes the
+room doc, but the house kept `room`/`roomExp`, so the card said "tonight's room is open" and
+Join hit "has ended". Now `leaveRoom` clears the house (`closeHouseRoom`, members only, only
+if the house still names THAT code) and `openHouseRoom` checks the room with `roomAlive()`
+first, replacing a dead one. No rules change (clause 1 lets a member set `room: null`).
 The console step (README step 9) is done and `GOOGLE_CLIENT_ID` is set. Observed against the real
 cloud from Charles's Chrome plus a Playwright guest: an anonymous host signed in and kept
 the SAME uid and the host's seat; a reload kept the Google session; a house created and

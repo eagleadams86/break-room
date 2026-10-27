@@ -31,11 +31,14 @@ group that meets again:
   (`…/break-room/#house=CODE`). Your houses follow your account to any browser.
 - **Open Tonight's Room** from a house: a normal room, labelled with the house. Every other
   member sees *Join Tonight's Room* on their Houses card. Two members pressing at once get
-  one room, not two. Guests still join with the six-letter code and no account.
+  one room, not two. When the last player leaves, the room closes and the house forgets
+  it; if a house still names a room that has ended, pressing the button opens a fresh one
+  instead of a dead end. Guests still join with the six-letter code and no account.
 - **The leaderboard.** Every point a **member** scores in a house's room is added to their
   row — total points, nights scored, best night — counted once however many members are in
   the room (the tally only ever adds the difference since it last counted). Guests are not
-  on it. Leave a house and your row stays, marked "left"; the founder can delete the house.
+  on it. Leave a house and your row stays, marked "left". The founder deletes the house from
+  the same window: press **Leaderboard**, then **Delete the House** at the bottom.
 - **The demo room belongs to a demo house**, so the leaderboard can be seen with no account:
   the invented players have a few nights behind them and your points join them.
 - Signing out leaves the room as your account and rejoins it as a guest.

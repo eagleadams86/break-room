@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 227;
+const EXPECTED = 228;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2651,7 +2651,16 @@ function define() {
   t('a room is labelled with its house only when it has one', () => {
     const mod = MOD();
     ok(/if \(house\) doc\.house = house;/.test(mod), 'so a plain room stays valid under every version of the rules');
-    ok(/if \(h\.room && h\.room !== code && Number\(h\.roomExp\) > Date\.now\(\)\) \{ other = h\.room; return; \}/.test(mod), 'two members opening at once: the first room stands');
+    ok(/if \(h\.room && h\.room !== code && h\.room !== stale && Number\(h\.roomExp\) > Date\.now\(\)\) \{ other = h\.room; return; \}/.test(mod), 'two members opening at once: the first room stands');
+  });
+  t('a house never sends its members to a room that has ended', () => {
+    const mod = MOD();
+    /* 2026-10-27: the last player out closed tonight's room, the house kept
+       naming it, and "Join Tonight's Room" said "Room … has ended". */
+    ok(/if \(await roomAlive\(d\.room\)\) return \{ code: d\.room, created: false \};\s*stale = d\.room;/.test(mod), 'the house’s room is checked against the room itself, and a dead one replaced');
+    ok(/async function roomAlive\(code\) \{[\s\S]{0,300}permission-denied'\) !== -1\) return false;/.test(mod), 'a closed room (read refused) counts as gone');
+    ok(/if \(h\.room !== code\) return;\s*tx\.update\(houseRef\(id\), \{ room: null, roomExp: 0,/.test(mod), 'closing clears only the room the house still names');
+    ok(/const h = closeRoom && !demoOn && room && room\.house \? houses\[room\.house\] : null;[\s\S]{0,200}closeHouseRoom\(h\.id, code\)/.test(APP_SRC), 'the last one out clears it from the house');
   });
 
   group('houses: what a reader sees');
