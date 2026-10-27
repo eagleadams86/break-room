@@ -95,8 +95,20 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 231 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
-+2 shared picker / Make Host below). **Shared picker + Make Host (2026-10-27):** every
+**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 238 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host, +7 quit/pause/end below).
+**Quit, pause, end early (PR #3, 2026-10-27):** every game gets `game.gid` at start; a
+player's record gets optional `out` = the gid they QUIT (rules: `validPlayer` allows `out`,
+int 0..GID_MAX — published from the console by Charles; the Publish click is blocked for
+Claude as a production deploy, so load the hash-checked file into CodeMirror and ask him to
+press it). **`playing()` — not `players` — is what step() and the game views get**, so a
+quitter looks like someone who left; a quitter's main view is the lobby. Pause =
+`game.pausedAt` (server sentinel): `gameNow()` freezes views, hostTick returns, `answerGame`
+refuses (`br/paused`); resume adds the pause to `stepAt`. End early = each game's `end()`
+(ice empties cards + key, Codenames `finish(...'ended')`), then `pausedAt: 0, early: 1`.
+Draw: a drawer not in the list passes the turn at once. Real-cloud checked with three
+Playwright contexts: quit → reveal in 0.6 s on a 60 s clock, pause froze + held an answer,
+end early reached all three, zero console errors. **Shared picker + Make Host (2026-10-27):** every
 player's lobby renders the picker (view state only, never written); only the host gets
 `#startBtn`. The host hands the seat on with `[data-make-host]` → `brCloud.handHost` (drops
 the answers/key listeners FIRST, like `leave()`, then `push({host})`) — online players,
