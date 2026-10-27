@@ -103,8 +103,10 @@ listed from `users/{uid}`; tonight's room opened from it; the guest refused (`pe
 denied`) reading the house, writing itself into `members`, writing its own users doc and
 creating a house; the board counted 150 then only the difference to 400, one night, the
 guest left off; sign-out left as the account and rejoined as a new anonymous player with
-the code kept. NOT observed: a second Google account joining by `#house=` link, and the
-`credential-already-in-use` switch.
+the code kept; signing in again from that anonymous player hit `credential-already-in-use`,
+switched back to the SAME Google uid, rejoined the room with the board intact, and took the
+seat back through the handoff clause ~30 s later. NOT observed: a second Google account
+joining by `#house=` link (only one account to test with).
 
 **Things a tidy-up would break (M6):**
 - **Sign-in LINKS (`linkWithCredential`) onto the anonymous uid, never signs in fresh.** The
