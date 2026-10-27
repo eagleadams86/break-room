@@ -2,7 +2,7 @@
 
 A room your team drops into beside the Teams or Zoom call you already have open. Pick a
 nickname, start a room or join one with its six-letter code, see who's around, and let the
-host run a round of trivia, a drawing game or an icebreaker while everyone talks. No account, nothing to install, and
+host run a round of trivia, a drawing game, an icebreaker or Codenames while everyone talks. No account, nothing to install, and
 nobody can open a room once it has ended.
 
 **Live: https://eagleadams86.github.io/break-room/** · **Privacy:** [privacy.html](https://eagleadams86.github.io/break-room/privacy.html)
@@ -14,6 +14,39 @@ anything from a work system. The plan is in
 decides that the rest of the family has not.
 
 ## What It Does Today
+
+**Milestone 5 — Codenames (27 October 2026).** The team word game, played beside the call:
+
+- **Two teams, Blue and Gold** — never red and green, which a red-green colourblind player
+  cannot tell apart — and every coloured card also says its colour in words. The host
+  picks Codenames in the lobby, with how long a spymaster has for a clue and a team has to
+  guess (2, 3 or 5 minutes each); it needs **four people online**.
+- **The host sees the teams first** — everyone online split as evenly as it goes, one
+  spymaster each — and can **Shuffle Teams** until it feels right, then **Start**. The team
+  that starts has nine words to find, the other eight; seven are bystanders and one is the
+  **assassin**.
+- **The spymaster types one word and a number** ("ocean 2"). A clue that is a word on the
+  board, or inside one, or around one, is refused. The team talks it over **on the call**
+  and anyone on it presses a word: their own colour lets them carry on (up to one more than
+  the number), anything else ends the turn, and the assassin loses the game on the spot.
+  When two teammates press at once, the earlier press counts. **End Our Turn** appears
+  after the first guess.
+- **Points:** everyone on the winning team, spymaster included, scores **100** toward the
+  night's total.
+- **Only the host and the two spymasters can read the key.** Which word is whose lives in
+  the same private record the icebreakers use, and the security rules refuse it to every
+  other player. The host's browser has to read it to turn cards over, so a host who is an
+  operative could look with the developer tools — like the drawing word, the key is kept
+  off the honest screen, not away from a determined cheat. The room itself only ever holds
+  the cards already turned; at the end the whole board is shown to everyone and the key
+  record is emptied.
+- **People come and go.** Someone who joins mid-game goes onto the smaller team; a spymaster
+  who has gone is replaced by a teammate who is here; a team down to one while the other has
+  three or more gets a player moved across; a team with nobody left to guess has its turns
+  skipped; and when neither side can guess, the game stops with no winner.
+- **The demo room plays it**: the invented spymasters give clues, and the invented
+  operatives peek at the key (the demo's privilege) and are right three times in four. On
+  your own team they wait longer, so you get the first press.
 
 **Milestone 4 — icebreakers (27 October 2026).** Three ways to get people talking, picked
 under *Kind* once the host chooses Icebreakers in the lobby:
@@ -134,10 +167,9 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (184 tests as of milestone 4).
+clause by clause, and a suite with a floor (202 tests as of milestone 5).
 
-**Coming next:** Codenames (milestone 5), and last
-of all Google sign-in for a standing house with a cross-night leaderboard (6).
+**Coming next:** last of all, Google sign-in for a standing house with a cross-night leaderboard (6).
 
 ## How a Room Works
 
@@ -226,6 +258,15 @@ anonymous players) on `localhost:8026`. The drawer's first stroke reached the ho
 **0.3 seconds** after the pen went down; the host, guessing, never had the word on screen; a
 third player who joined mid-turn got the whole drawing in one read; their guess list showed
 "Ann got it" and Ann's wrong guess, never the word; and nothing was refused by the rules.
+
+**Codenames against the real cloud, 27 October 2026:** four separate anonymous players. The
+key was readable by the host and the two spymasters and **refused** (`permission-denied`)
+to the operatives; the host left mid-game and the next player took the seat with the
+spymasters still reading the key; every card turned matched the key the first host wrote;
+the game ended on the assassin, the whole board went up for everyone and the key record was
+emptied; no console errors. The first run also found that a team left with only its
+spymaster stalled on its three-minute clocks — the reason for the "people come and go"
+rules above.
 
 ## Testing It With More Than One Person
 

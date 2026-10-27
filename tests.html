@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 184;
+const EXPECTED = 202;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2221,7 +2221,246 @@ function define() {
     H.DEMO_ICE_LINES.forEach((l) => eq(H.iceSubmission('whoSaid', l), l, l));
     H.DEMO_TRUTHS.forEach((s) => eq(H.iceSubmission('twoTruths', s), s, s.join(' / ')));
     ok(H.DEMO_TRUTHS.length >= H.DEMO_PLAYERS.filter((p) => !p.awayMs).length, 'a set for every demo player who is here');
-    eq(H.SCHEMA, 3, 'an M3 page halts on an icebreakers room rather than host a game it cannot run');
+    ok(H.SCHEMA >= 3, 'an M3 page halts on an icebreakers room rather than host a game it cannot run');
+  });
+
+  /* ═══════════════════════════════ Codenames ═════════════════════════════ */
+  const CN = H.GAMES.codenames;
+  const CN_NONCE = '0123456789abcdef';
+  const UE = 'EEEEeeeeeeeeeeeeeeeeeeeeeeee';
+  /* Ada (host), Ben, Dee and Eve online; Cat away. Blue is Ada and Ben with
+     BEN as spymaster — so the host is an OPERATIVE, the case that matters —
+     and Gold is Dee (spymaster) and Eve. Blue starts. */
+  const cnPlayers = () => drawPlayers().concat([{ uid: UE, nick: 'Eve', joinedAt: T0 - 20000, seenAt: T0 - 800, ansR: 0, hue: 4 }]);
+  const CN_KEY = { n: CN_NONCE, c: Array.from({ length: 25 }, (_, i) => (i < 9 ? 1 : i < 17 ? 2 : i < 24 ? 3 : 4)) };
+  const cnGame = (over) => Object.assign({ step: 'clue', stepAt: T0, stepMs: 180000, round: 2,
+    teams: { [U.host]: 'b', [U.b]: 'b', [U.d]: 'g', [UE]: 'g' }, spy: { b: U.b, g: U.d }, spies: [U.host, U.b, U.d],
+    words: H.CN_WORDS.slice(0, 25), revealed: Array(25).fill(0), first: 'b', turn: 'b', clue: null, left: 0, made: 0,
+    clueMs: 180000, guessMs: 180000, nonce: CN_NONCE, winner: '', why: '', colors: null, gained: null }, over || {});
+  const cnRoom = (game, scores, feed) => fixtureRoom({ phase: 'play', kind: 'codenames', schema: 4, scores: scores || {}, feed: feed || [], game: cnGame(game) });
+  const cctx = (answers, t, key, who, list) => ({ answers: answers, players: list || cnPlayers(), now: t, me: who === undefined ? U.host : who, key: key === undefined ? CN_KEY : key });
+  const said = (uid, v, r, at) => ({ uid: uid, r: r === undefined ? 2 : r, v: v, at: at || T0 + 1000 });
+  const guessing = (over) => cnRoom(Object.assign({ step: 'guess', round: 3, clue: { t: 'nature', n: 2 }, left: 3, made: 0 }, over || {}));
+  const step = (raw, answers, t, key, who, list) => CN.step(H.normalizeRoom(raw), cctx(answers, t || T0 + 5000, key, who, list));
+
+  group('codenames: the words, the teams and the deal');
+  t('the word list: four hundred or more, distinct, one plain word each', () => {
+    ok(H.CN_WORDS.length >= 400, H.CN_WORDS.length + ' words');
+    eq(new Set(H.CN_WORDS).size, H.CN_WORDS.length, 'no word twice');
+    const bad = H.CN_WORDS.filter((w) => !/^[a-z]{1,20}$/.test(w));
+    eq(bad, [], 'letters only, so the boundary keeps every one');
+    const clash = H.DEMO_CN_CLUES.filter((w) => H.cnClueClash({ words: H.CN_WORDS }, w));
+    eq(clash, [], 'and no demo clue can ever clash with a card');
+  });
+  t('setup: four online or no game; the teams are even and each spymaster is on their own team', () => {
+    ok(!!CN.setup({}, drawPlayers(), {}, T0, U.host).error, 'three online (Cat is away) is not enough');
+    for (let k = 0; k < 20; k++) {
+      const b = CN.setup({ cnClue: '120', cnGuess: '300' }, cnPlayers(), {}, T0, U.host);
+      const g = b.game, ids = Object.keys(g.teams);
+      eq(ids.sort(), [U.host, U.b, U.d, UE].sort(), 'everyone online is on a team, Cat is not');
+      eq(ids.filter((u) => g.teams[u] === 'b').length, 2, 'two a side');
+      ok(g.teams[g.spy.b] === 'b' && g.teams[g.spy.g] === 'g', 'each spymaster on their own side');
+      eq(g.spies, H.cnSpies(U.host, g.spy), 'the key readers: the host and the two spymasters');
+      eq([g.step, g.stepAt, g.stepMs, g.turn, g.clueMs, g.guessMs], ['teams', 'now', 0, g.first, 120000, 300000]);
+      const count = (c) => b.key.c.filter((x) => x === c).length;
+      eq([count(g.first === 'b' ? 1 : 2), count(g.first === 'b' ? 2 : 1), count(3), count(4)], [9, 8, 7, 1], 'nine for the starters, eight, seven bystanders, one assassin');
+      eq(b.key.n, g.nonce, 'the key and the board share a nonce');
+      eq(g.words.length, 25);
+      ok(!('c' in g) && !('colors' in g && g.colors), 'and no colour rides on the room');
+    }
+    const five = H.cnTeams(cnPlayers().concat([{ uid: 'FFFFffffffffffffffffffffffff', nick: 'Fay', joinedAt: T0 - 100, seenAt: T0 - 100, ansR: 0, hue: 0 }]), T0);
+    const nb = Object.values(five.teams).filter((x) => x === 'b').length;
+    ok(nb === 2 || nb === 3, 'five split three and two');
+  });
+  t('the key at the boundary: 25 colours from 1 to 4, all or nothing — and the icebreakers’ shape still reads', () => {
+    eq(H.normalizeKey({ key: CN_KEY }), CN_KEY);
+    eq(H.normalizeKey({ key: { n: CN_NONCE, c: CN_KEY.c.slice(1) } }), null, 'twenty-four colours is no key');
+    eq(H.normalizeKey({ key: { n: CN_NONCE, c: CN_KEY.c.slice(0, 24).concat([5]) } }), null, 'nor is a colour out of range');
+    eq(H.normalizeKey({ key: { n: '', c: [] } }), null, 'the emptied key reads as none');
+    eq(H.normalizeKey({ key: { n: CN_NONCE, a: [U.b], l: [] } }), { n: CN_NONCE, a: [U.b], l: [] }, 'the icebreakers’ map is unchanged');
+  });
+  t('the board at the boundary: 25 places or none, turned cards in range, junk teams dropped', () => {
+    const g = H.normalizeRoom(cnRoom({ teams: { [U.b]: 'b', 'bad id!': 'g', [U.d]: 'red' }, revealed: [1, 9, 'x'] })).game;
+    eq(g.teams, { [U.b]: 'b' }, 'a bad uid and an unknown team are dropped');
+    eq(g.revealed.slice(0, 4), [1, 4, 0, 0], 'turned cards are clamped and padded to the board');
+    eq(H.normalizeRoom(cnRoom({ words: H.CN_WORDS.slice(0, 24) })).game.words, [], 'a short board is no board — the rules refuse anything but 25');
+    eq(H.normalizeRoom(cnRoom({ clue: { t: 'two words', n: 3 } })).game.clue, null, 'a clue that is not one word is dropped');
+  });
+
+  group('codenames: the engine is a pure step()');
+  t('the team step waits for the host; a host who took the seat names itself a key reader first', () => {
+    eq(step(cnRoom({ step: 'teams', stepMs: 0, round: 1 }), [], T0 + 600000), null, 'no timer runs out on picking teams');
+    const p = step(cnRoom(), [], T0 + 5000, CN_KEY, UE);
+    eq(p.game.spies, [UE, U.b, U.d], 'Eve, now host, reads the key — and both spymasters keep reading it');
+    const q = step(cnRoom(), [], T0 + 5000, CN_KEY, U.b);
+    eq(q.game.spies, [U.b, U.d], 'Ben, a spymaster, takes the seat: Ada, no longer host and only an operative, is struck off');
+  });
+  t('a clue: only the spymaster whose turn it is, one word, never a word on the board', () => {
+    eq(step(cnRoom(), [said(U.host, 'C|nature|2')]), null, 'Ada is an operative: her “clue” is not read');
+    eq(step(cnRoom(), [said(U.d, 'C|nature|2')]), null, 'Gold’s spymaster cannot clue on Blue’s turn');
+    eq(step(cnRoom(), [said(U.b, 'C|' + H.CN_WORDS[3] + '|2')]), null, 'a word on the board is refused');
+    eq(step(cnRoom(), [said(U.b, 'C|nature|2', 1)]), null, 'and so is last round’s answer');
+    const p = step(cnRoom(), [said(U.b, 'C|nature|2')]);
+    eq([p.game.step, p.game.round, p.game.clue, p.game.left, p.game.made, p.game.stepMs], ['guess', 3, { t: 'nature', n: 2 }, 3, 0, 180000], 'one more guess than the number');
+    eq(p.feed.slice(-1)[0], { t: 'guess', uid: U.b, text: 'clue: nature 2' });
+    eq(H.normalizeFeed(p.feed), p.feed, 'the line fits the feed');
+    const late = step(cnRoom(), [], T0 + 180000);
+    eq([late.game.step, late.game.turn, late.game.round], ['clue', 'g', 3], 'no clue in time: over to Gold');
+    eq(H.cnCleanClue('  Sea-Shore '), 'sea-shore');
+    eq([H.cnCleanClue('two words'), H.cnCleanClue('r2d2'), H.cnCleanClue('x'.repeat(H.CN_CLUE_MAX + 1))], [null, null, null]);
+    ok(H.cnClueClash({ words: ['firework'] }, 'fire') && H.cnClueClash({ words: ['ant'] }, 'giant'), 'a clue inside a card, or around one, clashes');
+  });
+  t('a guess: the turn’s operatives only — never its spymaster — and the earliest press wins', () => {
+    eq(step(guessing(), [said(U.b, 0, 3)]), null, 'a spymaster cannot be an operative');
+    eq(step(guessing(), [said(UE, 0, 3)]), null, 'Gold cannot press on Blue’s turn');
+    eq(step(guessing(), [said(U.host, 0, 2)]), null, 'last round’s press is not this one');
+    eq(step(guessing({ revealed: [1].concat(Array(24).fill(0)) }), [said(U.host, 0, 3)]), null, 'a card already turned is not a guess');
+    eq(step(guessing(), [said(U.host, 'pass', 3)]), null, 'no passing before the first guess');
+    const catHere = cnPlayers().map((x) => (x.uid === U.c ? Object.assign({}, x, { seenAt: T0 - 100 }) : x));
+    const p = step(guessing({ teams: { [U.host]: 'b', [U.b]: 'b', [U.c]: 'b', [U.d]: 'g', [UE]: 'g' } }),
+      [said(U.host, 17, 3, T0 + 3000), said(U.c, 2, 3, T0 + 1000)], T0 + 5000, CN_KEY, U.host, catHere);
+    eq(p.game.revealed[2], 1, 'Cat pressed first: her card is the one turned');
+    eq(p.game.revealed[17], 0, 'Ada’s is not');
+  });
+  t('every way a card can turn out', () => {
+    const right = step(guessing(), [said(U.host, 0, 3)]);
+    eq([right.game.step, right.game.turn, right.game.round, right.game.left, right.game.made, right.game.revealed[0]], ['guess', 'b', 4, 2, 1, 1], 'our word: keep going');
+    ok(!('stepAt' in right.game) || right.game.stepAt === T0, 'and the turn’s clock keeps running');
+    eq(right.feed.slice(-1)[0], { t: 'guess', uid: U.host, text: H.CN_WORDS[0] + ' — blue' });
+    const lastGo = step(guessing({ left: 1, made: 2 }), [said(U.host, 0, 3)]);
+    eq([lastGo.game.step, lastGo.game.turn], ['clue', 'g'], 'our word on the last guess: over to them');
+    const by = step(guessing(), [said(U.host, 17, 3)]);
+    eq([by.game.step, by.game.turn, by.game.revealed[17]], ['clue', 'g', 3], 'a bystander ends the turn');
+    const theirs = step(guessing(), [said(U.host, 9, 3)]);
+    eq([theirs.game.step, theirs.game.turn, theirs.game.revealed[9]], ['clue', 'g', 2], 'their word ends the turn and counts for them');
+    const passed = step(guessing({ made: 1, left: 2 }), [said(U.host, 'pass', 3)]);
+    eq([passed.game.step, passed.game.turn], ['clue', 'g'], 'a pass after one guess hands it over');
+    const late = step(guessing(), [], T0 + 180000);
+    eq([late.game.step, late.game.turn], ['clue', 'g'], 'no guess in time: over to them');
+  });
+  t('the ends: the assassin loses it, the last word wins it, and the winners score', () => {
+    const a = step(guessing(), [said(U.host, 24, 3)], T0 + 5000);
+    eq([a.phase, a.game.winner, a.game.why, a.game.step], ['results', 'g', 'assassin', 'results'], 'Blue turned the assassin: Gold wins');
+    eq(a.scores, { [U.d]: 100, [UE]: 100 }, 'both of Gold score, spymaster too; Blue scores nothing');
+    eq(a._key, { n: '', c: [] }, 'the key document is emptied');
+    eq(a.game.colors, CN_KEY.c, 'and the whole key goes on the room for everyone to see');
+    const nearly = Array(25).fill(0).map((x, i) => (i < 8 ? 1 : 0));
+    const w = step(guessing({ revealed: nearly }), [said(U.host, 8, 3)], T0 + 5000, CN_KEY, U.host);
+    eq([w.phase, w.game.winner, w.game.why], ['results', 'b', 'found'], 'Blue’s ninth word wins it');
+    eq(w.scores, { [U.host]: 100, [U.b]: 100 });
+    const theirsLast = Array(25).fill(0).map((x, i) => (i >= 9 && i < 16 ? 2 : 0));
+    const o = step(guessing({ revealed: theirsLast }), [said(U.host, 16, 3)]);
+    eq([o.game.winner, o.game.why], ['g', 'found'], 'turning the other side’s last word wins it for THEM');
+    eq([H.cnLeft(H.normalizeRoom(guessing({ revealed: nearly })).game, 'b'), H.cnLeft(H.normalizeRoom(guessing()).game, 'g')], [1, 8], 'what is left comes from the turned cards alone');
+  });
+  t('no key, no turning: the host waits, then calls the game off rather than guess', () => {
+    eq(step(guessing(), [said(U.host, 0, 3)], T0 + 5000, null), null, 'a press without the key waits');
+    eq(step(guessing(), [said(U.host, 0, 3)], T0 + 5000, { n: 'ffffffffffffffff', c: CN_KEY.c }), null, 'so does last game’s key');
+    const off = step(guessing(), [], T0 + 180000 + H.CN_KEY_WAIT_MS, null);
+    eq([off.phase, off.game.winner, off.game.why, off.scores], ['results', '', 'lost', {}], 'nobody wins a game the key was lost from');
+  });
+  t('someone who arrives joins the smaller team; a spymaster who has gone is replaced', () => {
+    const fay = { uid: 'FFFFffffffffffffffffffffffff', nick: 'Fay', joinedAt: T0 - 100, seenAt: T0 - 100, ansR: 0, hue: 0 };
+    const p = step(cnRoom({ teams: { [U.host]: 'b', [U.b]: 'b', [U.d]: 'g', [UE]: 'g', [U.c]: 'b' } }), [], T0 + 5000, CN_KEY, U.host, cnPlayers().concat([fay]));
+    eq(p.game.teams[fay.uid], 'g', 'Fay joins Gold, which was one short');
+    const gone = cnPlayers().map((x) => (x.uid === U.b ? Object.assign({}, x, { seenAt: T0 - 10 * 60000 }) : x));
+    const q = step(cnRoom(), [], T0 + 5000, CN_KEY, U.host, gone);
+    eq([q.game.spy.b, q.game.spies], [U.host, [U.host, U.d]], 'Ben is away: Ada, his teammate here, is Blue’s spymaster now');
+    eq(q.feed.slice(-1)[0], { t: 'guess', uid: U.host, text: 'is Blue’s spymaster now' });
+  });
+  t('people leave: the teams are evened, a team with nobody to guess is skipped, and two left is the end', () => {
+    const fay = { uid: 'FFFFffffffffffffffffffffffff', nick: 'Fay', joinedAt: T0 - 100, seenAt: T0 - 100, ansR: 0, hue: 0 };
+    const away = (list, ids) => list.map((x) => (ids.indexOf(x.uid) !== -1 ? Object.assign({}, x, { seenAt: T0 - 10 * 60000 }) : x));
+    const five = cnPlayers().concat([fay]).map((x) => (x.uid === U.c ? Object.assign({}, x, { seenAt: T0 - 100 }) : x));
+    /* Blue: Ada, Ben (spy), Cat, Fay; Gold: Dee (spy), Eve — then Eve goes. */
+    const teams = { [U.host]: 'b', [U.b]: 'b', [U.c]: 'b', [fay.uid]: 'b', [U.d]: 'g', [UE]: 'g' };
+    const m = step(cnRoom({ teams: teams }), [], T0 + 5000, CN_KEY, U.host, away(five, [UE]));
+    eq(m.game.teams[U.host], 'g', 'Blue had three operatives and Gold none: one moves across');
+    eq(m.game.teams[U.b], 'b', 'never the spymaster');
+    ok(/moved to Gold/.test(m.feed.slice(-1)[0].text), 'and the log says so');
+    const solo = step(cnRoom({ turn: 'g' }), [], T0 + 5000, CN_KEY, U.host, away(cnPlayers(), [UE]));
+    eq([solo.game.step, solo.game.turn], ['clue', 'b'], 'Gold is Dee alone: her turn is skipped at once');
+    ok(/Gold has nobody left to guess/.test(solo.feed.slice(-1)[0].text) && solo.feed.slice(-1)[0].text.length <= 40, 'with a line that fits the feed');
+    const two = step(guessing(), [], T0 + 5000, CN_KEY, U.host, away(cnPlayers(), [U.host, UE]));
+    eq([two.phase, two.game.winner, two.game.why, two.scores], ['results', '', 'short', {}], 'two spymasters and nobody to guess: the game ends, nobody wins');
+  });
+
+  group('codenames: what a player sees');
+  const inCn = (asUid, roomRaw, key) => { H.__setOffset(T0 + 2000 - Date.now()); H.__setIceKey(key === undefined ? CN_KEY : key); H.__setMe(asUid); H.__plantPlayers(cnPlayers()); H.__plantRoom(roomRaw); };
+  const cnDone = () => { H.__setIceKey(null); H.__setMyCn({ round: 0, v: null }); home(); };
+  t('an operative’s screen never shows the key — not even the host’s, whose browser holds it', () => {
+    const D = W.document;
+    try {
+      inCn(U.host, guessing());
+      const cards = [...D.querySelectorAll('[data-cn-pick]')];
+      eq(cards.length, 25);
+      ok(cards.every((b) => !b.className && !/Blue|Gold|Bystander|Assassin/.test(b.textContent)), 'no colour and no word for one');
+      ok(cards.every((b) => !b.disabled), 'and every card is Ada’s to press');
+      inCn(UE, guessing());
+      ok([...D.querySelectorAll('[data-cn-pick]')].every((b) => b.disabled), 'Gold watches Blue’s turn');
+    } finally { cnDone(); }
+  });
+  t('a spymaster sees the key, in words as well as colour, and cannot press', () => {
+    const D = W.document;
+    try {
+      inCn(U.b, guessing({ revealed: [1].concat(Array(24).fill(0)) }));
+      const c0 = D.querySelector('[data-cn-pick="0"]'), c1 = D.querySelector('[data-cn-pick="1"]'), c24 = D.querySelector('[data-cn-pick="24"]');
+      ok(/cn-b/.test(c0.className) && !/cn-key/.test(c0.className) && /Blue/.test(c0.textContent), 'a turned card is solid');
+      ok(/cn-b cn-key/.test(c1.className) && /Blue · key/.test(c1.textContent), 'a face-down one shows the key, dashed', c1.className);
+      ok(/cn-x/.test(c24.className) && /Assassin/.test(c24.getAttribute('aria-label')), 'the assassin is named, not just dark');
+      ok([...D.querySelectorAll('[data-cn-pick]')].every((b) => b.disabled), 'and none of them can be pressed by the spymaster');
+      inCn(U.b, guessing(), null);
+      ok(!D.querySelector('.cn-key'), 'with no key yet, nothing is guessed at');
+    } finally { cnDone(); }
+  });
+  t('the clue form is the spymaster’s on their turn, and the number survives a heartbeat', () => {
+    const D = W.document;
+    try {
+      inCn(U.b, cnRoom());
+      ok(D.getElementById('cnClueBox') && D.getElementById('cnClueN'), 'Ben has the form');
+      D.getElementById('cnClueBox').value = 'ocean';
+      D.getElementById('cnClueN').value = '4';
+      H.__plantPlayers(cnPlayers().map((p) => (p.uid === UE ? Object.assign({}, p, { seenAt: T0 - 100 }) : p)));
+      eq([D.getElementById('cnClueBox').value, D.getElementById('cnClueN').value], ['ocean', '4'], 'a roster snapshot leaves both alone');
+      inCn(U.d, cnRoom());
+      ok(!D.getElementById('cnClueBox') && /thinking of a clue/.test(D.getElementById('cnStage').textContent), 'Dee waits for Blue’s spymaster');
+      inCn(U.host, cnRoom({ step: 'teams', stepMs: 0, round: 1 }));
+      ok(D.getElementById('cnShuffleBtn') && D.getElementById('cnBeginBtn'), 'the host shuffles and starts');
+      ok(/Ben/.test(D.querySelector('.cn-team.b').textContent) && /spymaster/.test(D.querySelector('.cn-team.b').textContent), 'the teams are listed, spymaster named');
+    } finally { cnDone(); }
+  });
+  t('the results show the whole board and who won; a nickname in the log is escaped', () => {
+    const D = W.document;
+    const evil = cnPlayers().map((p) => (p.uid === U.host ? Object.assign({}, p, { nick: '<img src=x onerror="window.__cnXss=1">' }) : p));
+    try {
+      H.__setOffset(T0 + 2000 - Date.now()); H.__setMe(U.d); H.__plantPlayers(evil);
+      H.__plantRoom(Object.assign(cnRoom({ step: 'results', winner: 'g', why: 'assassin', colors: CN_KEY.c, revealed: Array(24).fill(0).concat([4]) }), { phase: 'results' }));
+      const txt = D.getElementById('roomView').textContent;
+      ok(/Gold wins/.test(txt) && /found the assassin/.test(txt), 'who won and why', txt.slice(0, 200));
+      eq(D.querySelectorAll('.cn-board .cn-b').length, 9, 'every blue word shown');
+      ok(/not turned/.test(D.querySelector('[data-cn-pick="0"]').textContent), 'a card nobody turned says so');
+      H.__plantRoom(Object.assign(guessing(), { feed: [{ t: 'guess', uid: U.host, text: 'apple — blue' }] }));
+      ok(!D.querySelector('#roomView img') && !W.__cnXss, 'a nickname is text, never markup');
+    } finally { cnDone(); }
+  });
+
+  group('codenames: the cloud and the demo');
+  t('the key is written before the board, and the spymasters’ listener follows `spies`', () => {
+    const src = stripComments(APP_SRC);
+    ok(/if \(built\.key\) patch\._key = built\.key;\s*pushPatch\(patch\);/.test(src), 'startGame hands the key to pushPatch, which writes it first');
+    const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+    ok(/\(r\.kind === 'ice' \|\| r\.kind === 'codenames'\) && r\.phase === 'play' && spies\.indexOf\(user\.uid\) !== -1/.test(mod), 'the key listener attaches for a Codenames spymaster');
+    ok(/onKey: \(raw\) => \{ iceKey = normalizeKey\(raw\); if \(room && room\.kind === 'codenames'\) render\(\);/.test(src), 'and the board is redrawn when the key lands');
+    const rules = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(/d\.kind in \['trivia', 'draw', 'ice', 'codenames'\]/.test(rules), 'the rules know the game');
+    ok(/d\.game\.words\.size\(\) == 25/.test(rules) && H.CN_CARDS === 25, 'and a board is exactly 25');
+  });
+  t('the demo’s spymasters give clues the engine accepts, and the schema moved', () => {
+    const g = H.normalizeRoom(cnRoom()).game;
+    H.DEMO_CN_CLUES.forEach((w) => ok(!!H.cnParseClue('C|' + w + '|2', g), w));
+    eq(H.SCHEMA, 4, 'an M4 page halts on a Codenames room rather than host a game it cannot run');
+    eq(H.fmtClock(65000), '1:05');
+    eq(H.fmtClock(-1), '0:00');
   });
 
 }

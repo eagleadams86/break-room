@@ -907,6 +907,57 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
      reader is meant to study. Re-asserted here for the reveal only. */
   .answers.revealed button:disabled { opacity: 1; cursor: default; }
 
+  /* ── The Codenames board ────────────────────────────────────────────────
+     Five by five. The two teams are BLUE and GOLD — the pack's --series-1 and
+     --series-2 — and never red and green: Charles is red-green colourblind,
+     and so is one in twelve men on any call. Every coloured card also says
+     its colour IN WORDS (the .tag), so the fill is never the only cue. A
+     spymaster sees the key as a dashed edge and a faint tint on the cards
+     nobody has turned over yet; a turned card is solid for everybody. */
+  .cn-board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); margin: 0 0 var(--sp-5); }
+  .cn-board button { min-height: 60px; padding: 6px 4px; white-space: normal; display: flex; flex-direction: column;
+                     align-items: center; justify-content: center; gap: 2px; text-transform: capitalize;
+                     font-size: var(--fs-sm); line-height: var(--lh-tight); overflow-wrap: anywhere; text-align: center; }
+  /* A phone fits five cards in about 60px each: the word drops a size and
+     hyphenates, and the tag keeps only its short name ("Byst." for a
+     bystander) — the long form stays in the aria-label. */
+  .cn-board .cn-s { display: none; }
+  @media (max-width: 560px) {
+    .cn-board { gap: var(--sp-2); }
+    .cn-board button { font-size: 0.75rem; min-height: 52px; padding: 4px 2px; overflow-wrap: normal; hyphens: auto; }
+    .cn-board .cn-l, .cn-board .cn-more { display: none; }
+    .cn-board .cn-s { display: inline; }
+  }
+  .cn-board button .tag { font-size: var(--fs-xs); color: var(--text-secondary); text-transform: none; }
+  .cn-board button.cn-b { border: 2px solid var(--series-1); background: color-mix(in srgb, var(--series-1) 35%, var(--surface)); color: var(--text-primary); }
+  .cn-board button.cn-g { border: 2px solid var(--series-2); background: color-mix(in srgb, var(--series-2) 35%, var(--surface)); color: var(--text-primary); }
+  .cn-board button.cn-n { border: 2px solid var(--border-strong); background: var(--surface-alt); color: var(--text-secondary); }
+  .cn-board button.cn-x { border: 2px solid var(--text-primary); background: var(--text-primary); color: var(--bg); }
+  .cn-board button.cn-x .tag { color: var(--bg); }
+  .cn-board button.cn-key { border-style: dashed; }
+  .cn-board button.cn-key.cn-b { background: color-mix(in srgb, var(--series-1) 12%, var(--surface)); }
+  .cn-board button.cn-key.cn-g { background: color-mix(in srgb, var(--series-2) 12%, var(--surface)); }
+  .cn-board button.cn-key.cn-n { background: var(--surface); }
+  .cn-board button.cn-key.cn-x { background: var(--surface); color: var(--text-primary); }
+  .cn-board button.cn-key.cn-x .tag { color: var(--text-primary); }
+  .cn-board button.mine { outline: 3px solid var(--focus-border); outline-offset: 1px; }
+  /* A board is a result to read, not a row of dead controls: pack rule 20's
+     dimming would grey out every card nobody may press right now. */
+  .cn-board button:disabled { opacity: 1; cursor: default; }
+  .cn-teams { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin: 0 0 var(--sp-5); }
+  .cn-team { border: 2px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-4); }
+  .cn-team.b { border-color: var(--series-1); }
+  .cn-team.g { border-color: var(--series-2); }
+  .cn-team h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-base); }
+  .cn-team ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .cn-team li { display: flex; align-items: center; gap: var(--sp-3); overflow-wrap: anywhere; }
+  .cn-role { font-size: var(--fs-xs); color: var(--text-secondary); }
+  .cn-clue { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-4); overflow-wrap: anywhere; }
+  .cn-log { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); color: var(--text-secondary); display: flex; flex-direction: column; gap: 2px; }
+  .cn-clueform { display: flex; gap: var(--sp-4); flex-wrap: wrap; align-items: flex-end; margin: 0 0 var(--sp-5); }
+  .cn-clueform .field { margin: 0; }
+  .cn-clueform .grow { flex: 1 1 12rem; min-width: 0; }
+
   /* The scoreboard is a table because it has three columns that line up. The
      leader's row is bold rather than coloured. */
   .scores th.num, .scores td.num { width: 6ch; }
@@ -1234,7 +1285,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 3;
+const SCHEMA = 4;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -2965,7 +3016,15 @@ function normalizeKey(raw) {
   const k = raw && typeof raw === 'object' ? raw.key : null;
   if (!k || typeof k !== 'object') return null;
   const n = /^[0-9a-f]{16}$/.test(String(k.n)) ? String(k.n) : '';
-  if (!n || !Array.isArray(k.a)) return null;
+  if (!n) return null;
+  /* Codenames' key is the other shape the document holds: { n, c: [25
+     colours] }. All or nothing too — a colour out of range would put the
+     assassin somewhere it is not. */
+  if (!Array.isArray(k.a) && Array.isArray(k.c)) {
+    if (k.c.length !== CN_CARDS || !k.c.every((x) => Number.isInteger(x) && x >= 1 && x <= 4)) return null;
+    return { n: n, c: k.c.slice() };
+  }
+  if (!Array.isArray(k.a)) return null;
   const a = k.a.slice(0, PLAYERS_MAX).map((u) => String(u == null ? '' : u));
   if (!a.every((u) => ID_RE.test(u))) return null;
   const l = (Array.isArray(k.l) ? k.l : []).slice(0, PLAYERS_MAX).map((x) => int(x, 0, 2, 0));
@@ -3343,6 +3402,488 @@ function sendIceWrite(r) {
 }
 
 
+/* ═══════════════════════════════ Codenames ═══════════════════════════════
+   Two teams, BLUE and GOLD, and a board of 25 words. Each team has one
+   SPYMASTER who sees which words are whose and gives a one-word clue with a
+   number; the rest of the team (the operatives) talk it over on the call and
+   turn cards over one at a time. Find all your team's words first; turn the
+   ASSASSIN and your team loses on the spot.
+
+   The colours of the cards are the KEY, and the key lives in `live/key`
+   (the icebreakers' document), readable only by `game.spies` = [host, Blue's
+   spymaster, Gold's spymaster]. The host has to be in that list — its
+   browser turns the cards — so a host who is also an operative COULD peek
+   with the developer tools: the same bar as the drawing game's word, the
+   honest screen never shows it. `revealed[i]` (0 hidden, 1 blue, 2 gold,
+   3 bystander, 4 assassin) is the only part of the key on the room, and only
+   for cards already turned; the whole key goes on the room at results, so
+   everyone sees the board they were playing.
+
+   Answers ride the ordinary answer document: a spymaster's clue is
+   `C|word|n`, an operative's pick the card's index or 'pass'. EVERY TURNED
+   CARD MOVES THE ROUND, so an operative's next pick can never be mistaken
+   for the last one, and when two teammates press at once the earlier press
+   (server time) is the one that counts — the other simply presses again. */
+const CN_TEAMS = ['b', 'g'];
+const CN_TEAM_NAMES = { b: 'Blue', g: 'Gold' };
+const CN_COL = { b: 1, g: 2 };
+const CN_NEUTRAL = 3, CN_ASSASSIN = 4;
+const CN_COL_NAMES = ['', 'Blue', 'Gold', 'Bystander', 'Assassin'];
+const CN_COL_SHORT = ['', 'Blue', 'Gold', 'Byst.', 'Assn.'];
+const CN_CARDS = 25;
+const CN_FIRST_N = 9;                /* the team that starts has one more word to find */
+const CN_NEUTRALS = 7;
+const CN_MIN = 4;                    /* two teams of two: a spymaster and an operative each */
+const CN_CLUE_MAX = 24;              /* the clue goes into a feed line of 40 */
+const CN_CLUE_RE = /^C\|([a-z]+(?:-[a-z]+)*)\|([1-9])$/;
+const CN_TIMES = ['120', '180', '300'];
+const CN_WIN_PTS = 100;
+const CN_KEY_WAIT_MS = 20000;
+/* Written for this project: plain nouns, most with a second meaning, none a
+   colleague would mind reading out on a work call. One word each, letters
+   only — a clue is checked against them. */
+const CN_WORDS = `
+apple anchor angel ant arrow atlas avocado back ball band bank bark bat battery beach bear bed bell belt berry
+bill bird block board bolt bond boot bottle bow box bridge brush bubble buck bug bugle button cable cake calf
+camel camp canal candle cap capital car card carrot castle cat cell chain chair change charge check cheese chest
+chick china chip church circle cliff cloak clock cloud club coach coast code coin cold comet compass concert cook
+copper cotton court cover crab crane crash cricket cross crown crystal cup current cycle dance date day deck
+desert diamond dice dinosaur doctor dog dollar door dragon draft dream dress drill drop drum duck eagle earth
+echo egg engine eye face fair fall fan feather fence field fig file film fire fish flag flute fly fog foot
+forest fork fountain fox frame frog frost game garden gas ghost giant glass glove gold grace grass green ground
+guitar hammer hand harbor hat hawk head heart helmet hero hole honey hood hook horn horse hospital hotel ice iron
+island ivory jack jam jacket jet jewel judge jungle kangaroo kettle key kick king kite kiwi knife knight ladder
+lake lamp laser lead leaf lemon letter life light lime line link lion lock log magnet mail map maple marble march
+mark mask match maze mercury mint mirror mole moon mouse mouth mud nail needle net night note novel nurse nut
+oak ocean octopus office oil olive opera orange organ owl page paint palm pan paper park party pass paste pear
+pen penguin pepper piano pick pie pig pilot pin pipe pirate pit pitch plane planet plate plot pocket point pole
+pool port post pound press prince pumpkin pupil puzzle pyramid queen rabbit racket radio rain ram ring river
+robin robot rock rocket roll root rose round ruler saddle sail salt satellite saturn scale school scope scout
+screen seal server shadow shark sheep shell ship shoe shop sink skate slip smoke snake snow sock soul space spell
+spider spike spine spot spring spy square staff stamp star steam steel stick stock storm straw stream string
+suit sun swan switch table tablet tag tail tank tap teacher telescope temple tent thief thread throne thunder
+tick tiger time toast tooth torch tower track train triangle trip trunk tube tulip turkey umbrella unicorn
+vacuum van violin volcano wagon wall watch water wave web well whale whip wind window wine witch wolf worm yard
+zebra zone ninja wizard cactus igloo lantern mammoth meteor mustard noodle oyster parrot pearl pebble pillow
+popcorn quilt riddle saucer scarf shovel sphinx sponge squid sugar sweater tornado trumpet tunnel vampire waffle
+walrus yeti yogurt zipper bamboo banana beard beetle blanket buffalo canoe carpet cherry cobra coconut comb
+crayon crow dart dolphin donkey elbow falcon gravity hamster harp hive jelly jockey ketchup koala ladle lobster
+magic medal monkey napkin orbit otter panda peanut pickle plaster puppet raft rainbow rhino sausage scissors
+snail sofa spoon stadium statue sunrise sushi sword taxi tennis tractor treasure turtle vase vine viking wallet
+wheel whistle yacht`.trim().split(/\s+/);
+
+const cnOther = (team) => (team === 'b' ? 'g' : 'b');
+/* The key's readers: the host first, then the two spymasters, once each. */
+function cnSpies(host, spy) {
+  return [host, spy.b, spy.g].filter((u, i, a) => ID_RE.test(String(u || '')) && a.indexOf(u) === i);
+}
+/* Online players split as evenly as they go, in a shuffled order; the first
+   on each side is its spymaster. */
+function cnTeams(list, t) {
+  const ids = list.filter((p) => isOnline(p, t)).map((p) => p.uid);
+  const order = shuffled(ids.length).map((i) => ids[i]);
+  const teams = {}, spy = { b: '', g: '' };
+  const start = Math.random() < 0.5 ? 0 : 1;
+  order.forEach((u, i) => {
+    const team = CN_TEAMS[(i + start) % 2];
+    teams[u] = team;
+    if (!spy[team]) spy[team] = u;
+  });
+  return { teams: teams, spy: spy };
+}
+/* A board and its key: 9 for the team that starts, 8 for the other, 7
+   bystanders and one assassin, in random places. */
+function cnDeal(first) {
+  const words = shuffled(CN_WORDS.length).slice(0, CN_CARDS).map((i) => CN_WORDS[i]);
+  const bag = [];
+  for (let i = 0; i < CN_FIRST_N; i++) bag.push(CN_COL[first]);
+  for (let i = 0; i < CN_FIRST_N - 1; i++) bag.push(CN_COL[cnOther(first)]);
+  for (let i = 0; i < CN_NEUTRALS; i++) bag.push(CN_NEUTRAL);
+  bag.push(CN_ASSASSIN);
+  return { words: words, c: shuffled(CN_CARDS).map((i) => bag[i]) };
+}
+/* How many of a team's words are still face down: the totals are fixed by
+   who started, so this needs only the turned cards, never the key. */
+function cnLeft(g, team) {
+  const total = team === g.first ? CN_FIRST_N : CN_FIRST_N - 1;
+  return total - g.revealed.filter((c) => c === CN_COL[team]).length;
+}
+/* A clue as typed: one word (hyphens allowed), letters only, lower-cased —
+   or null. Not a word on the board, and not inside one or around one. */
+function cnCleanClue(raw) {
+  const w = String(raw == null ? '' : raw).trim().toLowerCase();
+  return /^[a-z]+(?:-[a-z]+)*$/.test(w) && w.length <= CN_CLUE_MAX ? w : null;
+}
+function cnClueClash(g, w) {
+  return g.words.some((x) => x && (x === w || (x.length >= 3 && w.indexOf(x) !== -1) || (w.length >= 3 && x.indexOf(w) !== -1)));
+}
+function cnParseClue(v, g) {
+  const m = typeof v === 'string' ? CN_CLUE_RE.exec(v) : null;
+  if (!m || m[1].length > CN_CLUE_MAX || cnClueClash(g, m[1])) return null;
+  return { t: m[1], n: Number(m[2]) };
+}
+function cnPickValid(g, v) {
+  if (v === 'pass') return g.made > 0;
+  return Number.isInteger(v) && v >= 0 && v < CN_CARDS && g.revealed[v] === 0 && !!g.words[v];
+}
+/* The key this browser holds, if it is THIS board's. */
+function cnKeyFor(g, key) {
+  return key && key.n === g.nonce && Array.isArray(key.c) && key.c.length === CN_CARDS ? key : null;
+}
+
+GAMES.codenames = {
+  id: 'codenames', name: 'Codenames', min: CN_MIN, max: PLAYERS_MAX,
+  normalize(g, base) {
+    const teams = {};
+    if (g.teams && typeof g.teams === 'object')
+      Object.keys(g.teams).filter((k) => ID_RE.test(k) && CN_TEAMS.indexOf(g.teams[k]) !== -1).slice(0, PLAYERS_MAX)
+        .forEach((k) => { teams[k] = g.teams[k]; });
+    const s = g.spy && typeof g.spy === 'object' ? g.spy : {};
+    const spy = { b: ID_RE.test(String(s.b)) ? String(s.b) : '', g: ID_RE.test(String(s.g)) ? String(s.g) : '' };
+    /* The board keeps its 25 positions — the key names colours BY POSITION —
+       or is no board at all (the rules refuse anything but 25). */
+    const words = Array.isArray(g.words) && g.words.length === CN_CARDS
+      ? g.words.map((w) => (/^[a-z]{1,20}$/.test(String(w)) ? String(w) : '')) : [];
+    const rv = Array.isArray(g.revealed) ? g.revealed : [];
+    const c = g.clue && typeof g.clue === 'object' ? g.clue : null;
+    const clueT = c ? cnCleanClue(c.t) : null;
+    return Object.assign(base, {
+      teams: teams, spy: spy,
+      spies: uidList(g.spies).slice(0, 3),
+      words: words,
+      revealed: words.map((w, i) => int(rv[i], 0, 4, 0)),
+      first: CN_TEAMS.indexOf(g.first) === -1 ? 'b' : g.first,
+      turn: CN_TEAMS.indexOf(g.turn) === -1 ? 'b' : g.turn,
+      clue: clueT ? { t: clueT, n: int(c.n, 1, 9, 1) } : null,
+      left: int(g.left, 0, 10, 0),
+      made: int(g.made, 0, 10, 0),
+      clueMs: int(g.clueMs, 30000, 600000, 180000),
+      guessMs: int(g.guessMs, 30000, 600000, 180000),
+      nonce: /^[0-9a-f]{16}$/.test(String(g.nonce)) ? String(g.nonce) : '',
+      winner: CN_TEAMS.indexOf(g.winner) === -1 ? '' : g.winner,
+      why: ['assassin', 'found', 'lost', 'short'].indexOf(g.why) === -1 ? '' : g.why,
+      colors: Array.isArray(g.colors) && g.colors.length === CN_CARDS ? g.colors.map((x) => int(x, 1, 4, CN_NEUTRAL)) : null,
+      gained: g.gained == null ? null : uidMap(g.gained, 1e5),
+    });
+  },
+  options(pk) {
+    const sel = (id, label, v) => '<div class="field"><label for="' + id + '">' + label + '</label><select id="' + id + '">'
+      + CN_TIMES.map((s) => '<option value="' + s + '"' + (s === v ? ' selected' : '') + '>' + (Number(s) / 60) + ' minutes</option>').join('')
+      + '</select></div>';
+    return sel('pickCnClue', 'Time for a clue', pk.cnClue) + sel('pickCnGuess', 'Time to guess', pk.cnGuess)
+      + '<p class="hint cost-line">Two teams, Blue and Gold. Each team’s spymaster gives one-word clues; the team talks it over on the call and turns the words over. Needs four people online.</p>';
+  },
+  setup(pk, list, loc, t, host) {
+    const at = t == null ? now() : t;
+    const who = host == null ? me : host;
+    if (list.filter((p) => isOnline(p, at)).length < CN_MIN) return { error: 'Codenames needs four people online — two teams of two.' };
+    const split = cnTeams(list, at);
+    const first = Math.random() < 0.5 ? 'b' : 'g';
+    const deal = cnDeal(first);
+    const nonce = randomHex(8);
+    const ms = (v) => (CN_TIMES.indexOf(String(v)) === -1 ? 180 : Number(v)) * 1000;
+    return {
+      key: { n: nonce, c: deal.c },
+      game: { step: 'teams', stepAt: 'now', stepMs: 0, round: 1, teams: split.teams, spy: split.spy,
+              spies: cnSpies(who, split.spy), words: deal.words, revealed: deal.words.map(() => 0),
+              first: first, turn: first, clue: null, left: 0, made: 0, clueMs: ms(pk.cnClue), guessMs: ms(pk.cnGuess),
+              nonce: nonce, winner: '', why: '', colors: null, gained: null },
+      pack: null,
+    };
+  },
+  /* THE engine. Pure: (room, ctx) → the patch the host should push, or null. */
+  step(r, ctx) {
+    const g = r.game, t = ctx.now;
+    if (r.phase !== 'play' || r.kind !== 'codenames' || !(g.stepAt > 0)) return null;
+    /* The key's readers are exactly this host and the two spymasters. A
+       host who took the seat mid-game names itself first (the handoff write
+       may change only host and rev), and the old host — who may come back
+       as an operative — is struck off in the same write. */
+    if (ctx.me) {
+      const spies = cnSpies(ctx.me, g.spy);
+      if (spies.join() !== g.spies.join()) return { game: Object.assign({}, g, { spies: spies }) };
+    }
+    if (g.step === 'teams') return null;
+    const online = ctx.players.filter((p) => isOnline(p, t));
+    /* Somebody who arrives mid-game joins the smaller team. */
+    const fresh = online.filter((p) => !g.teams[p.uid]);
+    if (fresh.length) {
+      const teams = Object.assign({}, g.teams);
+      fresh.forEach((p) => {
+        const nb = Object.keys(teams).filter((u) => teams[u] === 'b').length;
+        const ng = Object.keys(teams).filter((u) => teams[u] === 'g').length;
+        teams[p.uid] = nb <= ng ? 'b' : 'g';
+      });
+      return { game: Object.assign({}, g, { teams: teams }) };
+    }
+    /* A spymaster who has gone is replaced by a teammate who is here; the
+       new one is named a key reader in the same write. */
+    for (const team of CN_TEAMS) {
+      if (online.some((p) => p.uid === g.spy[team])) continue;
+      const mate = online.find((p) => g.teams[p.uid] === team);
+      if (!mate) continue;
+      const spy = Object.assign({}, g.spy, { [team]: mate.uid });
+      return { feed: r.feed.concat([{ t: 'guess', uid: mate.uid, text: 'is ' + CN_TEAM_NAMES[team] + '’s spymaster now' }]).slice(-FEED_MAX),
+               game: Object.assign({}, g, { spy: spy, spies: cnSpies(r.host, spy) }) };
+    }
+    /* People leave. A team down to one while the other has three or more
+       gets an operative moved across; a team with nobody left to guess has
+       its turns skipped; and when neither side can guess the game stops —
+       rather than run three-minute clocks that nobody can beat. */
+    const ops = (team) => online.filter((p) => g.teams[p.uid] === team && p.uid !== g.spy[team]);
+    for (const team of CN_TEAMS) {
+      const small = online.filter((p) => g.teams[p.uid] === team), mover = ops(cnOther(team))[0];
+      if (small.length >= 2 || ops(cnOther(team)).length < 3 || !mover) continue;
+      return { feed: r.feed.concat([{ t: 'guess', uid: mover.uid, text: 'moved to ' + CN_TEAM_NAMES[team] + ' to even the teams' }]).slice(-FEED_MAX),
+               game: Object.assign({}, g, { teams: Object.assign({}, g.teams, { [mover.uid]: team }) }) };
+    }
+    if (!ops('b').length && !ops('g').length) return GAMES.codenames.finish(r, g, cnKeyFor(g, ctx.key), null, 'short', r.feed);
+    if (!ops(g.turn).length) return GAMES.codenames.endTurn(r, g, CN_TEAM_NAMES[g.turn] + ' has nobody left to guess');
+    const timeUp = t >= g.stepAt + g.stepMs;
+    const live = ctx.answers.filter((a) => a.r === g.round);
+    if (g.step === 'clue') {
+      const sub = live.find((a) => a.uid === g.spy[g.turn] && cnParseClue(a.v, g));
+      if (sub) {
+        const clue = cnParseClue(sub.v, g);
+        return { feed: r.feed.concat([{ t: 'guess', uid: sub.uid, text: 'clue: ' + clue.t + ' ' + clue.n }]).slice(-FEED_MAX),
+                 game: Object.assign({}, g, { step: 'guess', stepAt: 'now', stepMs: g.guessMs, round: g.round + 1, clue: clue, left: clue.n + 1, made: 0 }) };
+      }
+      return timeUp ? GAMES.codenames.endTurn(r, g, CN_TEAM_NAMES[g.turn] + ' ran out of time for a clue') : null;
+    }
+    if (g.step !== 'guess') return null;
+    const key = cnKeyFor(g, ctx.key);
+    if (!key) return t >= g.stepAt + g.stepMs + CN_KEY_WAIT_MS ? GAMES.codenames.finish(r, g, null, '', 'lost', r.feed) : null;
+    /* Only the team whose turn it is, and never its spymaster. The earliest
+       press wins; the others' presses for this card are simply not read. */
+    const cand = live.filter((a) => g.teams[a.uid] === g.turn && a.uid !== g.spy[g.turn] && cnPickValid(g, a.v))
+      .sort((a, b) => a.at - b.at);
+    if (cand.length) return GAMES.codenames.turnCard(r, key, cand[0]);
+    return timeUp ? GAMES.codenames.endTurn(r, g, CN_TEAM_NAMES[g.turn] + '’s time ran out') : null;
+  },
+  turnCard(r, key, a) {
+    const g = r.game;
+    if (a.v === 'pass') return GAMES.codenames.endTurn(r, g, '', { t: 'guess', uid: a.uid, text: 'passed' });
+    const i = a.v, col = key.c[i];
+    const revealed = g.revealed.slice();
+    revealed[i] = col;
+    const line = { t: 'guess', uid: a.uid, text: g.words[i] + ' — ' + CN_COL_NAMES[col].toLowerCase() };
+    const after = Object.assign({}, g, { revealed: revealed });
+    const feed = r.feed.concat([line]).slice(-FEED_MAX);
+    const mine = g.turn, other = cnOther(g.turn);
+    if (col === CN_ASSASSIN) return GAMES.codenames.finish(r, after, key, other, 'assassin', feed);
+    if (cnLeft(after, mine) === 0) return GAMES.codenames.finish(r, after, key, mine, 'found', feed);
+    if (cnLeft(after, other) === 0) return GAMES.codenames.finish(r, after, key, other, 'found', feed);
+    if (col === CN_COL[mine] && g.left > 1) {
+      return { feed: feed, game: Object.assign(after, { round: g.round + 1, left: g.left - 1, made: g.made + 1 }) };
+    }
+    return GAMES.codenames.endTurn(Object.assign({}, r, { feed: feed }), after, '');
+  },
+  /* Over to the other team's spymaster. */
+  endTurn(r, g, note, line) {
+    let feed = r.feed;
+    if (line) feed = feed.concat([line]);
+    if (note) feed = feed.concat([{ t: 'info', uid: r.host, text: note.slice(0, FEED_TEXT_MAX) }]);
+    return { feed: feed.slice(-FEED_MAX),
+             game: Object.assign({}, g, { step: 'clue', stepAt: 'now', stepMs: g.clueMs, round: g.round + 1,
+                                          turn: cnOther(g.turn), clue: null, left: 0, made: 0 }) };
+  },
+  /* The end: every player on the winning team scores, the whole key goes on
+     the room so everyone sees the board they played, and the key document is
+     emptied. */
+  finish(r, g, key, winner, why, feed) {
+    const scores = Object.assign({}, r.scores), gained = {};
+    if (winner) Object.keys(g.teams).filter((u) => g.teams[u] === winner).forEach((u) => { gained[u] = CN_WIN_PTS; scores[u] = (scores[u] || 0) + CN_WIN_PTS; });
+    const note = { lost: 'the key was lost — game over', short: 'too few people left to play on' }[why];
+    const out = feed.concat(note ? [{ t: 'info', uid: r.host, text: note }] : []).slice(-FEED_MAX);
+    return { phase: 'results', scores: scores, feed: out, _key: { n: '', c: [] },
+             game: Object.assign({}, g, { step: 'results', stepAt: 'now', stepMs: 0, winner: winner || '', why: why,
+                                          colors: key ? key.c.slice() : null, gained: gained, clue: null }) };
+  },
+  encode(input) { return input; },
+
+  /* ── What a player sees ────────────────────────────────────────────────
+     Refreshed in place like the icebreakers: the clue form is a box AND a
+     number, and a wholesale redraw on every heartbeat would reset the
+     number. Keyed on everything that changes what the body says. */
+  key(r, who) {
+    const g = r.game;
+    const k = cnKeyFor(g, iceKey) && (g.spy.b === who || g.spy.g === who) ? 'k' : '';
+    return [g.step, g.round, who, cnAnswered(r, who) ? 'sent' : '', k, JSON.stringify(g.teams), g.spy.b, g.spy.g, r.host].join(':');
+  },
+  meter(r, who, list, t) {
+    const g = r.game;
+    if (g.step === 'teams') return 'Picking teams';
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    const cd = '<span class="countdown' + (left < 15000 ? ' low' : '') + '" id="qLeft">' + fmtClock(left) + '</span>';
+    return '<strong>' + CN_TEAM_NAMES[g.turn] + '’s turn</strong> · ' + (g.step === 'clue' ? 'clue' : 'guessing') + ' · ' + cd + ' left';
+  },
+  view(r, who, list, ans, t) {
+    const g = r.game;
+    const head = 'Codenames<span class="spacer"></span><span class="pill">Blue ' + cnLeft(g, 'b') + ' left · Gold ' + cnLeft(g, 'g') + ' left</span>';
+    return '<div class="card" id="cnStage" data-key="' + esc(GAMES.codenames.key(r, who)) + '">'
+      + '<h2>' + head + '</h2>'
+      + '<div class="meter"><span data-part="meter">' + GAMES.codenames.meter(r, who, list, t) + '</span></div>'
+      + GAMES.codenames.body(r, who) + '</div>';
+  },
+  roleLine(g, who) {
+    const team = g.teams[who];
+    if (!team) return '<p class="hint">You’re watching — you’ll join a team in a moment.</p>';
+    return '<p class="lede">You’re on <strong>' + CN_TEAM_NAMES[team] + '</strong>'
+      + (g.spy[team] === who ? ', and you’re its <strong>spymaster</strong>: you see the key, and you give the clues — but no talking about the board!' : ' — an operative: listen to your spymaster’s clue and pick words together.') + '</p>';
+  },
+  teamsHtml(g, who) {
+    return '<div class="cn-teams">' + CN_TEAMS.map((team) => {
+      const ids = players.map((p) => p.uid).filter((u) => g.teams[u] === team)
+        .concat(Object.keys(g.teams).filter((u) => g.teams[u] === team && !players.some((p) => p.uid === u)));
+      return '<div class="cn-team ' + team + '"><h3>' + CN_TEAM_NAMES[team] + '</h3><ul>' + ids.map((u) => {
+        const p = players.find((x) => x.uid === u) || { nick: 'Someone', hue: 0 };
+        return '<li>' + avatarHtml(p) + '<span>' + esc(p.nick) + (u === who ? ' <span class="you">(you)</span>' : '')
+          + (g.spy[team] === u ? ' <span class="cn-role">· spymaster</span>' : '') + '</span></li>';
+      }).join('') + '</ul></div>';
+    }).join('') + '</div>';
+  },
+  /* The board. A spymaster sees the key on face-down cards; everyone sees
+     the turned ones; at results `colors` shows the whole key. A card is a
+     button only for an operative whose turn it is. */
+  boardHtml(g, who, opts) {
+    const key = opts.key, can = opts.can, picked = opts.picked;
+    return '<div class="cn-board" role="group" aria-label="The board">' + g.words.map((w, i) => {
+      const turned = g.revealed[i];
+      const shown = turned || (g.colors ? g.colors[i] : 0);
+      const col = shown || (key ? key.c[i] : 0);
+      const cls = ['', 'cn-b', 'cn-g', 'cn-n', 'cn-x'][col] + (col && !turned ? ' cn-key' : '') + (picked === i ? ' mine' : '');
+      const more = col && !turned ? (shown ? ' · not turned' : ' · key') : '';
+      const tag = col ? CN_COL_NAMES[col] + more : picked === i ? 'your pick' : '';
+      const tagHtml = col ? '<span class="cn-l">' + CN_COL_NAMES[col] + '</span><span class="cn-s">' + CN_COL_SHORT[col] + '</span>'
+          + (more ? '<span class="cn-more">' + more + '</span>' : '') : esc(tag);
+      const open = can && !turned;
+      return '<button type="button" data-cn-pick="' + i + '" class="' + cls.trim() + '"' + (open ? '' : ' disabled')
+        + ' aria-label="' + esc(w + (tag ? ', ' + tag : '')) + '"><span>' + esc(w) + '</span>'
+        + (tag ? '<span class="tag">' + tagHtml + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
+  },
+  logHtml(r) {
+    const rows = r.feed.slice(-6).reverse().map((f) => '<li>' + (f.t === 'guess' ? esc(nickOf(f.uid)) + ' — ' : '') + esc(f.text) + '</li>').join('');
+    return rows ? '<ul class="cn-log" aria-label="What just happened">' + rows + '</ul>' : '';
+  },
+  body(r, who) {
+    const g = r.game;
+    const team = g.teams[who];
+    const isSpy = !!team && g.spy[team] === who;
+    const key = isSpy ? cnKeyFor(g, iceKey) : null;
+    const role = GAMES.codenames.roleLine(g, who);
+    if (g.step === 'teams') {
+      return role + GAMES.codenames.teamsHtml(g, who) + (who === r.host
+        ? '<div class="row-actions" style="justify-content:flex-start"><button type="button" id="cnShuffleBtn">Shuffle Teams</button>'
+          + '<button type="button" class="primary" id="cnBeginBtn">Start — ' + CN_TEAM_NAMES[g.first] + ' Goes First</button></div>'
+        : '<p class="hint">Waiting for <strong>' + esc(nickOf(r.host)) + '</strong> to start. ' + CN_TEAM_NAMES[g.first] + ' goes first and has nine words to find; the other team has eight.</p>');
+    }
+    const sent = cnAnswered(r, who);
+    const spyName = esc(nickOf(g.spy[g.turn]));
+    let top = '';
+    if (g.step === 'clue') {
+      if (isSpy && team === g.turn) {
+        top = sent ? '<p class="lede">Clue sent — waiting for it to land.</p>'
+          : '<div class="cn-clueform"><div class="field grow"><label for="cnClueBox">Your clue — one word</label>'
+            + '<input type="text" id="cnClueBox" maxlength="' + CN_CLUE_MAX + '" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'
+            + '<div class="field"><label for="cnClueN">For how many</label><select id="cnClueN">'
+            + [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => '<option value="' + n + '"' + (String(n) === cnDraftN ? ' selected' : '') + '>' + n + '</option>').join('')
+            + '</select></div><button type="button" class="primary" id="cnClueBtn">Give Clue</button></div>'
+            + (key ? '' : '<p class="hint">Loading the key…</p>');
+      } else {
+        top = '<p class="lede">' + spyName + ' (' + CN_TEAM_NAMES[g.turn] + '’s spymaster) is thinking of a clue.</p>';
+      }
+    } else {
+      const op = team === g.turn && !isSpy;
+      top = '<p class="cn-clue">Clue: ' + esc(g.clue ? g.clue.t.toUpperCase() + ' ' + g.clue.n : '—') + '</p>'
+        + '<p class="hint">' + (op ? (sent ? 'Sent — turning it over…' : 'Talk it over, then pick a word. ')
+          + g.left + (g.left === 1 ? ' guess' : ' guesses') + ' left this turn.'
+          : CN_TEAM_NAMES[g.turn] + ' is guessing — ' + g.left + (g.left === 1 ? ' guess' : ' guesses') + ' left.') + '</p>';
+    }
+    const can = g.step === 'guess' && team === g.turn && !isSpy && !sent;
+    const picked = myCn.round === g.round && Number.isInteger(myCn.v) ? myCn.v : null;
+    const pass = can && g.made > 0
+      ? '<div class="row-actions" style="justify-content:flex-start"><button type="button" id="cnPassBtn">End Our Turn</button></div>' : '';
+    return role + top + GAMES.codenames.boardHtml(g, who, { key: key, can: can, picked: picked }) + pass + GAMES.codenames.logHtml(r);
+  },
+  refresh(r, who, list, t) {
+    const stage = $('cnStage');
+    if (!stage || stage.getAttribute('data-key') !== GAMES.codenames.key(r, who)) return false;
+    const el = stage.querySelector('[data-part="meter"]');
+    const html = GAMES.codenames.meter(r, who, list, t);
+    if (el && el.innerHTML !== html) el.innerHTML = html;
+    return true;
+  },
+  tick(r, t) {
+    const el = $('qLeft');
+    if (!el) return;
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    el.textContent = fmtClock(left);
+    el.classList.toggle('low', left < 15000);
+  },
+  onClick(btn, r, who) {
+    const g = r.game;
+    if (btn.id === 'cnShuffleBtn' || btn.id === 'cnBeginBtn') {
+      if (!iAmHost() || g.step !== 'teams') return;
+      if (btn.id === 'cnShuffleBtn') {
+        const split = cnTeams(players, now());
+        if (Object.keys(split.teams).length < CN_MIN) { toast('Codenames needs four people online'); return; }
+        pushPatch({ game: Object.assign({}, g, { teams: split.teams, spy: split.spy, spies: cnSpies(me, split.spy) }) });
+      } else {
+        pushPatch({ feed: [], game: Object.assign({}, g, { step: 'clue', stepAt: 'now', stepMs: g.clueMs, round: g.round + 1, turn: g.first }) });
+      }
+      return;
+    }
+    if (btn.id === 'cnClueBtn') { sendCnClue(r); return; }
+    if (btn.id === 'cnPassBtn') { sendCnPick(r, 'pass'); return; }
+    const v = btn.getAttribute('data-cn-pick');
+    if (v === null || btn.disabled) return;
+    sendCnPick(r, Number(v));
+  },
+  results(r, who) {
+    const g = r.game;
+    const head = g.winner
+      ? '<p class="lede"><strong>' + CN_TEAM_NAMES[g.winner] + ' wins</strong> — ' + (g.why === 'assassin'
+          ? CN_TEAM_NAMES[cnOther(g.winner)] + ' found the assassin.' : 'every one of their words found.')
+        + ' Everyone on ' + CN_TEAM_NAMES[g.winner] + ' scores ' + CN_WIN_PTS + '.</p>'
+      : '<p class="lede">The game ended without a winner — ' + (g.why === 'short' ? 'too few people were left to play on.' : 'the host’s browser lost the key.') + '</p>';
+    return head + GAMES.codenames.teamsHtml(g, who) + (g.words.length === CN_CARDS ? GAMES.codenames.boardHtml(g, who, { key: null, can: false, picked: null }) : '')
+      + '<p class="hint">The key has been cleared from the room’s private record. Points carry on to the next game.</p>';
+  },
+};
+/* This browser's own part in Codenames, in memory only: its pick (or clue)
+   for the current round, and the clue form's number across a redraw. */
+let myCn = { round: 0, v: null };
+let cnDraftN = '2';
+function cnAnswered(r, who) {
+  const g = r.game;
+  const mine = players.find((p) => p.uid === who);
+  return myCn.round === g.round || !!(mine && mine.ansR === g.round);
+}
+function sendCnClue(r) {
+  const g = r.game;
+  if (g.step !== 'clue' || g.spy[g.turn] !== me || cnAnswered(r, me)) return;
+  const raw = $('cnClueBox') ? $('cnClueBox').value : '';
+  const w = cnCleanClue(raw);
+  if (!w) { toast(/\s/.test(raw.trim()) ? 'A clue is one word' : 'Type a clue: letters only'); return; }
+  if (cnClueClash(g, w)) { toast('That is too close to a word on the board'); return; }
+  const n = $('cnClueN') ? int($('cnClueN').value, 1, 9, 1) : 1;
+  const v = 'C|' + w + '|' + n;
+  myCn = { round: g.round, v: v };
+  noteWrite();
+  transport().answer(g.round, v).catch((e) => { console.warn('cn clue', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
+  render();
+}
+function sendCnPick(r, v) {
+  const g = r.game;
+  if (g.step !== 'guess' || g.teams[me] !== g.turn || g.spy[g.turn] === me || cnAnswered(r, me) || !cnPickValid(g, v)) return;
+  myCn = { round: g.round, v: v };
+  noteWrite();
+  transport().answer(g.round, v).catch((e) => { console.warn('cn pick', e); myCn = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
+  render();
+}
+
 /* ═══════════════════════════════ Rendering ═══════════════════════════════ */
 
 /* Which screen: the home card when there is no room, the room otherwise. The
@@ -3403,6 +3944,8 @@ function fmtLeft(ms) {
   return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
 }
 function fmtSecs(ms) { return String(Math.max(0, Math.ceil(ms / 1000))); }
+/* A countdown of minutes, as m:ss — Codenames' turns run to five minutes. */
+function fmtClock(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 const iAmHost = () => !!(room && me && room.host === me);
 
 function renderRoster() {
@@ -3462,10 +4005,10 @@ function renderScores(title) {
 /* The host's choices while the lobby is up, read back before every redraw so
    a snapshot arriving mid-choice does not reset the picker. View state, never
    saved: the choices are copied onto the room document when the game starts. */
-let pick = { kind: 'trivia', pack: '', n: '20', secs: '20', rounds: '1', dsecs: '75', mode: 'whoSaid', prompts: '2' };
+let pick = { kind: 'trivia', pack: '', n: '20', secs: '20', rounds: '1', dsecs: '75', mode: 'whoSaid', prompts: '2', cnClue: '180', cnGuess: '180' };
 function pickState() {
   const k = $('pickKind'), p = $('pickPack'), n = $('pickN'), s = $('pickSecs'), rd = $('pickRounds'), ds = $('pickDSecs');
-  const md = $('pickMode'), pr = $('pickPrompts');
+  const md = $('pickMode'), pr = $('pickPrompts'), cc = $('pickCnClue'), cg = $('pickCnGuess');
   if (k) pick.kind = k.value;
   if (p) pick.pack = p.value;
   if (n) pick.n = n.value;
@@ -3474,6 +4017,8 @@ function pickState() {
   if (ds) pick.dsecs = ds.value;
   if (md) pick.mode = md.value;
   if (pr) pick.prompts = pr.value;
+  if (cc) pick.cnClue = cc.value;
+  if (cg) pick.cnGuess = cg.value;
 }
 
 function renderLobby() {
@@ -3584,8 +4129,10 @@ function transport() { return demoOn ? demoSim : window.brCloud; }
 
 let heartbeatTimer = null, tickTimer = null, lastWriteAt = 0, claimAskedAt = 0;
 let pushInFlight = false, pendingRev = 0, pendingSince = 0;
-/* The icebreakers' author map, as this browser last read or wrote it —
-   only ever the host's (the rules let nobody else read it). Memory only. */
+/* The `live/key` document as this browser last read or wrote it — the
+   icebreakers' author map (the host's alone) or the Codenames colours (the
+   host's and the two spymasters'; the rules let nobody else read it).
+   Named for the game that brought it. Memory only. */
 let iceKey = null;
 
 function noteWrite() { lastWriteAt = Date.now(); }
@@ -3636,7 +4183,7 @@ async function leaveRoom(reason) {
   t.stop();
   const wasDemo = demoOn;
   room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
-  iceKey = null; myIce = { round: 0, v: null, write: null };
+  iceKey = null; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null };
   if (wasDemo) {
     const id = window.brCloud && window.brCloud.uid ? window.brCloud.uid() : null;
     me = ID_RE.test(String(id || '')) ? String(id) : null;
@@ -3729,7 +4276,7 @@ window.brApp = {
     if (next.expiresAt <= now()) { leaveRoom('That room has ended'); return; }
     /* A new game starts its rounds from 1 again, so an answer remembered from
        the last game must not read as this game's. */
-    if (next.phase !== 'play' || !room || room.kind !== next.kind) { myPick = { round: 0, v: null }; myIce = { round: 0, v: null, write: null }; }
+    if (next.phase !== 'play' || !room || room.kind !== next.kind) { myPick = { round: 0, v: null }; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null }; }
     /* The game is over and this browser drew the last picture: wipe it, so a
        drawing does not sit in the cloud after the game it belonged to. The
        room still names this browser as the drawer at results, which is what
@@ -3745,7 +4292,7 @@ window.brApp = {
   onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); },
   onAnswers: (list) => { answers = normalizeAnswers(list); hostTick(); },
   onStrokes: (raw) => { strokesDoc = normalizeStrokes(raw); padAdopt(); },
-  onKey: (raw) => { iceKey = normalizeKey(raw); hostTick(); },
+  onKey: (raw) => { iceKey = normalizeKey(raw); if (room && room.kind === 'codenames') render(); hostTick(); },
   onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
   onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
   noteWrite: noteWrite,
@@ -3855,6 +4402,9 @@ const DEMO_TRUTHS = [
   ['I have run a marathon backwards', 'I grew up on a farm', 'I speak three languages'],
   ['I have never seen snow', 'I collect vinyl records', 'I was a lifeguard one summer'],
 ];
+/* What an invented spymaster says: clue words that are not on the board
+   list, so none of them can ever clash with a card. */
+const DEMO_CN_CLUES = ['nature', 'travel', 'music', 'kitchen', 'museum', 'weather', 'history', 'science', 'autumn', 'farm'];
 /* The demo's doodles: what an invented drawer can draw, as strokes on the
    0–1000 grid. A circle is squashed by 3/4 across so it comes out round on
    the 4:3 canvas. Every word here is in DRAW_WORDS. */
@@ -3979,6 +4529,34 @@ const demoSim = (() => {
       }
     });
   };
+  /* The invented players' Codenames. An invented spymaster gives a clue
+     after a pause; an invented operative peeks at the key — the demo's
+     privilege — and is right three times in four ("quick": always), and
+     ends the turn once it has used the clue's number. With you on the same
+     team it waits longer, so you get the first press. */
+  const demoCn = () => {
+    const g = normalizeRoom(simRoom).game;
+    const r = g.round;
+    const here = (u) => DEMO_PLAYERS.some((p) => p.uid === u && !p.awayMs);
+    if (g.step === 'clue' && here(g.spy[g.turn])) {
+      const free = DEMO_CN_CLUES.filter((w) => !cnClueClash(g, w));
+      const w = free[r % free.length] || 'thing';
+      later(3500 + Math.random() * 2500, () => say(g.spy[g.turn], r, 'C|' + w + '|2'));
+      return;
+    }
+    const key = normalizeKey({ key: simKey });
+    if (g.step !== 'guess' || !key || key.n !== g.nonce) return;
+    const ops = DEMO_PLAYERS.filter((p) => !p.awayMs && g.teams[p.uid] === g.turn && g.spy[g.turn] !== p.uid);
+    if (!ops.length) return;
+    const p = ops[r % ops.length];
+    const human = g.teams[DEMO_ME] === g.turn && g.spy[g.turn] !== DEMO_ME;
+    const hidden = g.words.map((w, i) => i).filter((i) => !g.revealed[i]);
+    const ours = hidden.filter((i) => key.c[i] === CN_COL[g.turn]);
+    const right = /quick/.test(p.nick) || Math.random() < 0.75;
+    const v = g.made >= (g.clue ? g.clue.n : 1) ? 'pass'
+      : right && ours.length ? ours[0] : hidden[Math.floor(Math.random() * hidden.length)];
+    later((human ? 12000 : 4000) + Math.random() * 2500, () => say(p.uid, r, v));
+  };
   /* A patch from the host, applied the way the cloud's transaction would:
      `stepAt: 'now'` becomes the clock, `rev` goes up by one. */
   const applyPatch = (patch) => {
@@ -4016,6 +4594,7 @@ const demoSim = (() => {
       lastKey = key;
       if (fresh && simRoom.phase === 'play' && simRoom.kind === 'draw') { stopTimers(); demoDraw(); }
       if (fresh && simRoom.phase === 'play' && simRoom.kind === 'ice') { stopTimers(); demoIce(); }
+      if (fresh && simRoom.phase === 'play' && simRoom.kind === 'codenames') { stopTimers(); demoCn(); }
       /* The invented players answer a new question on their own, each at
          their own pace — which is what shows the speed bonus. */
       if (fresh && simRoom.phase === 'play' && simRoom.game.step === 'ask') {
@@ -4396,9 +4975,11 @@ $('roomView').addEventListener('click', (e) => {
 /* The picker's options depend on the game, and the drawing estimate on the
    rounds and seconds — so a change there redraws the lobby. */
 $('roomView').addEventListener('change', (e) => {
+  if (e.target.id === 'cnClueN') cnDraftN = e.target.value;
   if (room && room.phase === 'lobby' && /^pick(Kind|Rounds|DSecs|Mode)$/.test(e.target.id || '')) render();
 });
 $('roomView').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.id === 'cnClueBox' && room && room.kind === 'codenames') { e.preventDefault(); sendCnClue(room); return; }
   if (e.key === 'Enter' && e.target.id === 'guessBox' && room && room.kind === 'draw') { e.preventDefault(); sendGuess(room, me); }
   /* The two-truths boxes walk down on Enter; the last one, or the single
      box, sends. */
@@ -4415,7 +4996,11 @@ function startGame() {
   if (!g || !iAmHost()) return;
   const built = g.setup(pick, players, local, now(), me);
   if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
-  pushPatch({ phase: 'play', kind: g.id, game: built.game, pack: built.pack || null, feed: [] });
+  /* A game with a key (Codenames) has it written before the room, like a
+     deal's: pushPatch takes `_key` off and writes it first. */
+  const patch = { phase: 'play', kind: g.id, game: built.game, pack: built.pack || null, feed: [] };
+  if (built.key) patch._key = built.key;
+  pushPatch(patch);
 }
 
 /* ── The Invite window ─────────────────────────────────────────────────────
@@ -4467,6 +5052,7 @@ const HELP = {
   scores: ['How Points Are Worked Out', `<p>A correct answer is worth <strong>100 points plus a speed bonus of up to 100</strong>: the bonus is the share of the question’s time that was still left when the answer arrived, so an answer at the halfway mark earns 150 in all. A wrong answer, or none, earns nothing and costs nothing.</p>
     <p><strong>Drawing &amp; Guess</strong> works the same way for a guesser — 100 for getting the word plus up to 100 for speed — and the <strong>drawer earns 50 for every player who gets it</strong>, so a clear drawing pays.</p>
     <p><strong>Icebreakers</strong> have no speed bonus. Guessing who wrote an answer, or spotting the lie, is <strong>50 points</strong>, and the author earns <strong>25 for every player they fooled</strong>. In Best Answer, every vote your answer gets is <strong>100 points</strong>; nobody can vote for their own.</p>
+    <p><strong>Codenames</strong> is a team game: when a team wins — every one of its words found, or the other team turned over the assassin — <strong>everyone on it scores 100</strong>, spymaster included. The losing team scores nothing and loses nothing.</p>
     <p>Timing is measured by the <strong>server’s clock</strong> on both ends — when the question opened and when your answer landed — never by your own computer’s, so a slow laptop clock cannot help or hurt. Points <strong>carry across games</strong> for the whole night; someone who joins late starts on nought.</p>`],
 };
 const helpDialog = $('helpDialog');
@@ -4642,6 +5228,10 @@ window.__brTestHooks = {
   DEMO_ICE_LINES: DEMO_ICE_LINES, DEMO_TRUTHS: DEMO_TRUTHS,
   __iceKey: () => iceKey, __setIceKey: (k) => { iceKey = k; }, __myIce: () => myIce, __setMyIce: (v) => { myIce = v; render(); },
   pushPatch: pushPatch,
+  CN_WORDS: CN_WORDS, CN_CARDS: CN_CARDS, CN_MIN: CN_MIN, CN_WIN_PTS: CN_WIN_PTS, CN_KEY_WAIT_MS: CN_KEY_WAIT_MS, CN_CLUE_MAX: CN_CLUE_MAX,
+  cnTeams: cnTeams, cnDeal: cnDeal, cnLeft: cnLeft, cnSpies: cnSpies, cnCleanClue: cnCleanClue, cnClueClash: cnClueClash,
+  cnParseClue: cnParseClue, cnPickValid: cnPickValid, DEMO_CN_CLUES: DEMO_CN_CLUES, fmtClock: fmtClock,
+  __myCn: () => myCn, __setMyCn: (v) => { myCn = v; render(); },
   __pad: () => pad, __strokesDoc: () => strokesDoc, __myDraw: () => myDraw, __setDraw: (w) => { myDraw = w; },
 };
 </script>
@@ -4820,7 +5410,7 @@ function syncStrokesListener(code, r) {
    write anyway (pushPatch). A refused read waits thirty seconds. */
 function syncKeyListener(code, r) {
   const spies = r && r.game && Array.isArray(r.game.spies) ? r.game.spies : [];
-  const want = !!user && r.kind === 'ice' && r.phase === 'play' && spies.indexOf(user.uid) !== -1;
+  const want = !!user && (r.kind === 'ice' || r.kind === 'codenames') && r.phase === 'play' && spies.indexOf(user.uid) !== -1;
   if (want && !keyUnsub && Date.now() - keyFailedAt > 30000) {
     keyUnsub = F.onSnapshot(keyRef(code), (s) => {
       window.brApp.onKey(s.exists() ? plain(s.data()) : null);

@@ -86,6 +86,50 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
+**M5 — Codenames (2026-10-27).** `GAMES.codenames` — teams **Blue and Gold** (`'b'`/`'g'`,
+the pack's `--series-1`/`--series-2`; never red/green, and every coloured card names its
+colour in a `.tag`), a `teams` step the host can Shuffle and Start, then `clue` (a
+spymaster's `C|word|n` answer) → `guess` (an operative's card index, or `'pass'` after one
+guess) per turn, 9/8/7/1 cards, the 504-word `CN_WORDS`, 100 to everyone on the winning
+team. The key (`{n, c: [25 colours 1–4]}`) lives in **`live/key`**, readable by `game.spies`
+= `cnSpies(host, spy)` = [host, Blue's spymaster, Gold's spymaster] — the rules had that
+clause from M0, so **no rules change**. `normalizeKey` reads both shapes now. **SCHEMA 4.**
+Observed against the real cloud with four Playwright contexts: the key read by the host and
+both spymasters and refused to the operatives (`permission-denied`), the host leaving
+mid-game, every turned card matching the key, the whole board on the room at results and
+the key emptied, zero console errors. `EXPECTED` 202.
+
+**Things a tidy-up would break (M5):**
+- **Every turned card moves `round`.** An operative's next press is a new round, so it can
+  never be read as the last one; when two teammates press in the same round the EARLIER
+  `at` (server time) wins and the other press is simply never read. The turn's clock
+  (`stepAt`) does NOT restart on a turned card — only on a new clue or a new turn.
+- **The host is in `spies`, so a host who is an operative COULD read the key** with the
+  developer tools — its browser turns the cards. The honest screen shows the key only when
+  `who` is a spymaster (`body()`), and a test walks the host-operative's board. Same bar as
+  the drawing word; don't "fix" it with a server.
+- **`spies` is recomputed, not appended**: step() returns `{spies: cnSpies(me, spy)}`
+  whenever the list differs, which names a new host AND strikes off the old one (who may
+  come back as an operative). Promoting a spymaster rewrites it in the same write.
+- **People leaving is handled in step(), in this order**: name the host → seat late joiners
+  on the smaller team → replace an absent spymaster → move an operative across when a team
+  is down to one and the other has three operatives → skip the turn of a team with no
+  operative → end the game (`why: 'short'`, no winner) when neither has one. Found by the
+  first real-cloud run: a team left with only its spymaster ran out three-minute clocks
+  for ever. The last check must stay BEFORE the turn skip, or two spymasters alone would
+  hand the turn back and forth on every tick.
+- **The room carries only `revealed` (turned cards) until results**, when `colors` (the
+  whole key) goes on and `_key` empties the document. `cnLeft()` works from `revealed` and
+  `first` alone, never the key, so the "8 left" pill is safe on every screen.
+- **`words` is 25 or absent** — the rules check `words.size() == 25` — so `normalize`
+  turns a short board into `[]` rather than padding it.
+- **The demo's clue words must not clash with any `CN_WORDS` entry** (a test checks the
+  whole list): "sport" and "holiday" did ("port", "day").
+- **The clue form refreshes in place** (`GAMES.codenames.refresh`, keyed on step, round,
+  who, sent, key-present, teams, spymasters, host), and `cnDraftN` keeps the number across
+  a full redraw. On a phone (≤ 560px) the tags shorten (`.cn-s`: "Byst.", "Assn."); the
+  long form stays in the aria-label.
+
 **M4 — icebreakers (2026-10-27).** `GAMES.ice` — one game, three `game.mode`s: `whoSaid`
 (write → a 15 s `guess` per card → `reveal`), `twoTruths` (write three, lie first → a 20 s
 `lie` per player → `reveal`) and `prompt` (write → one 30 s `vote` over every card →
@@ -267,8 +311,8 @@ Firebase console steps are a numbered checklist in the README and need Charles.
 - A new field on a room, a player or an answer goes into the matching `normalize*`
   allowlist, into `firestore.rules`, AND bumps `SCHEMA` in the same commit, or the boundary
   strips it and the rules refuse it.
-- Nicknames (20), questions (160), answers (60 × 4), drawing guesses (40) and icebreaker
-  answers (120, or 60 × 3 for two truths) are the only free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
+- Nicknames (20), questions (160), answers (60 × 4), drawing guesses (40), icebreaker
+  answers (120, or 60 × 3 for two truths) and Codenames clues (one word, 24) are the only free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
   none is to be added.**
 - Escape everything rendered with `esc()`. Every nickname, question and answer on screen
   was typed in another browser: it is untrusted input on the shared origin.
