@@ -6302,7 +6302,9 @@ async function openHouseRoom(id, nick) {
 async function roomAlive(code) {
   try {
     const r = await F.getDoc(roomRef(code));
-    return r.exists() && Number(r.data().expiresAt) > Date.now();
+    /* plain(): expiresAt is a Timestamp, and Number(Timestamp) is NaN —
+       which once called every room dead and gave two members two rooms. */
+    return r.exists() && Number(plain(r.data()).expiresAt) > Date.now();
   } catch (e) { if (String(e && e.code).indexOf('permission-denied') !== -1) return false; throw e; }
 }
 /* The last player out closed tonight's room: the house forgets it, so its

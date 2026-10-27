@@ -102,7 +102,9 @@ load, so a link pasted into a tab ALREADY on the app (hash change, no reload) di
 room doc, but the house kept `room`/`roomExp`, so the card said "tonight's room is open" and
 Join hit "has ended". Now `leaveRoom` clears the house (`closeHouseRoom`, members only, only
 if the house still names THAT code) and `openHouseRoom` checks the room with `roomAlive()`
-first, replacing a dead one. No rules change (clause 1 lets a member set `room: null`).
+first, replacing a dead one. **`roomAlive` must read `plain(r.data())`** — the first
+version did `Number(r.data().expiresAt)`, a Timestamp, got NaN, called every room dead, and
+two members pressing the house's button got two rooms. A test bans raw `.data().expiresAt`. No rules change (clause 1 lets a member set `room: null`).
 The console step (README step 9) is done and `GOOGLE_CLIENT_ID` is set. Observed against the real
 cloud from Charles's Chrome plus a Playwright guest: an anonymous host signed in and kept
 the SAME uid and the host's seat; a reload kept the Google session; a house created and

@@ -2676,7 +2676,11 @@ function define() {
     /* 2026-10-27: the last player out closed tonight's room, the house kept
        naming it, and "Join Tonight's Room" said "Room … has ended". */
     ok(/if \(await roomAlive\(d\.room\)\) return \{ code: d\.room, created: false \};\s*stale = d\.room;/.test(mod), 'the house’s room is checked against the room itself, and a dead one replaced');
-    ok(/async function roomAlive\(code\) \{[\s\S]{0,300}permission-denied'\) !== -1\) return false;/.test(mod), 'a closed room (read refused) counts as gone');
+    ok(/async function roomAlive\(code\) \{[\s\S]{0,500}permission-denied'\) !== -1\) return false;/.test(mod), 'a closed room (read refused) counts as gone');
+    ok(/r\.exists\(\) && Number\(plain\(r\.data\(\)\)\.expiresAt\) > Date\.now\(\)/.test(mod), 'the end time goes through plain() — Number() of a Timestamp is NaN, and every room read as dead');
+    /* Every room-doc time read in the module goes through plain(): no raw
+       `.data().expiresAt` anywhere. */
+    ok(!/\.data\(\)\.expiresAt/.test(mod), 'no Timestamp is ever read raw');
     ok(/if \(h\.room !== code\) return;\s*tx\.update\(houseRef\(id\), \{ room: null, roomExp: 0,/.test(mod), 'closing clears only the room the house still names');
     ok(/const h = closeRoom && !demoOn && room && room\.house \? houses\[room\.house\] : null;[\s\S]{0,200}closeHouseRoom\(h\.id, code\)/.test(APP_SRC), 'the last one out clears it from the house');
   });
