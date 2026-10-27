@@ -93,9 +93,19 @@ from server time plus the measured offset. The suite drives a whole game through
 with fake answers and a fake clock, pins the packs (forty each, four distinct answers, no
 repeats, unchanged by the boundary) and the parser's line-numbered report. The demo's
 invented players answer on their own, each at a pace named in their nickname. `EXPECTED`
-131. Still unobserved against a real Firebase project: everything in the module, and the
-three "Done" lines in the plan that need two browser profiles (A creates / B joins / C by
-link; host reload mid-game; hidden-tab countdown on return) wait for the console steps.
+131.
+
+**The cloud went on the same afternoon (project `breakroom-3722e`, Spark plan).** Observed
+in two real browsers (the desktop app's pane and Charles's Chrome, two anonymous uids): A
+creates, B joins by the `#join=` link with the fragment stripped and the code in the box,
+both see each other within a second; a ten-question game with answers from both sides,
+scored 133 and 111 by server time; the host reloads mid-game and rejoins as host with the
+game still moving (rev went on without a gap). **Not on Spark: the four TTL policies and
+the budget alert** — both need Blaze. The README's checklist says what that costs (abandoned
+rooms are not deleted; everything else is). Two paste lessons: `firestore.rules` is
+ASCII-only because the console editor mangled UTF-8 punctuation; and every answer button
+carries an `aria-label`, because a button whose only text is in two spans was unnamed to
+the accessibility tree the browser tools read.
 
 **Things a tidy-up would break (M2):**
 - **`myPick` is reset when the phase leaves `play` or the kind changes**, in `onRoom`. A

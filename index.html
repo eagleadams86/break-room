@@ -1961,7 +1961,12 @@ GAMES.trivia = {
               else if (answered === i) { cls = ' wrong'; tag = 'yours'; }
               if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' answer' : ' answers');
             } else if (answered === i) { cls = ' mine'; tag = 'your answer'; }
-            return '<button type="button" data-ans="' + i + '" class="' + cls.trim() + '"' + ((reveal || haveAnswered) ? ' disabled' : '') + '>'
+            /* aria-label as well as the text: the answer and its tag are two
+               spans, and some readers of the tree (the harness among them) name
+               a button only from a label — so the label says what the button
+               says, and the tag rides along after a comma. */
+            return '<button type="button" data-ans="' + i + '" class="' + cls.trim() + '"' + ((reveal || haveAnswered) ? ' disabled' : '')
+              + ' aria-label="' + esc(a + (tag ? ', ' + tag : '')) + '">'
               + '<span>' + esc(a) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
           }).join('') + '</div>';
     }
@@ -3103,15 +3108,19 @@ window.__brTestHooks = {
    PROFILE ARE ONE PLAYER for the same reason.
 ──────────────────────────────────────────────────────────────────────────── */
 
-/* Firebase's PUBLIC web client config. EMPTY until the project exists — the
-   README's "Setting Up the Cloud" is the checklist that produces it; paste the
-   console's `firebaseConfig` fields inside the braces. An empty object rather
-   than null, and the guard below reads a FIELD rather than the object, because
-   `{}` is truthy and a constant null is a guard CodeQL rightly calls dead
-   (League Night's lesson, 2026-09): the test is `apiKey`, the one field without
-   which nothing can be initialised. */
+/* Firebase's PUBLIC web client config for the breakroom-3722e project (created
+   2026-10-27), not a secret — access is enforced by firestore.rules. The guard
+   below reads a FIELD rather than the object, because `{}` is truthy and a
+   constant null is a guard CodeQL rightly calls dead (League Night's lesson):
+   the test is `apiKey`, the one field without which nothing can be initialised.
+   Empty the braces to force fully local mode. */
 const FIREBASE_CONFIG = {
-  /* apiKey: "…", authDomain: "…", projectId: "…", storageBucket: "…", messagingSenderId: "…", appId: "…" */
+  apiKey: "AIzaSyA_3hjhtgpdyLMN6M4sdUiqmkcBcLBRxDw",
+  authDomain: "breakroom-3722e.firebaseapp.com",
+  projectId: "breakroom-3722e",
+  storageBucket: "breakroom-3722e.firebasestorage.app",
+  messagingSenderId: "168957055210",
+  appId: "1:168957055210:web:5f0a8dab2bd3bb5125c793"
 };
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';

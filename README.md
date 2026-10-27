@@ -73,9 +73,6 @@ worker, the install manifest, room codes from an alphabet with no O/0/I/1, the b
 allowlists for everything that arrives from another browser, `firestore.rules` argued
 clause by clause, and a suite with a floor (131 tests as of milestone 2).
 
-**Until the cloud is connected** (the checklist below) both doors on the home card are
-disabled and the card says why; the demo room is the only room there is.
-
 **Coming next:** drawing & guess (milestone 3), icebreakers (4), Codenames (5), and last
 of all Google sign-in for a standing house with a cross-night leaderboard (6).
 
@@ -99,35 +96,61 @@ of all Google sign-in for a standing house with a cross-night leaderboard (6).
 
 ## Setting Up the Cloud
 
-The module at the foot of `index.html` carries `FIREBASE_CONFIG` (Firebase's public web
-client config, not a secret — access is enforced by `firestore.rules`). While it is empty
-the app is fully local and nothing is ever sent anywhere. These are the console steps that
-turn it on; none of them can be done from a terminal, so they wait for Charles:
+The module at the foot of `index.html` carries `FIREBASE_CONFIG` — Firebase's public web
+client config for the project **`breakroom-3722e`** (created 27 October 2026), not a
+secret: access is enforced by `firestore.rules`. Empty the braces and the app is fully
+local with nothing ever sent anywhere. These are the console steps that made the project,
+kept for the day it is rebuilt or a sibling app needs the same. **Done** marks what is in
+place today.
 
 1. **Create a Firebase project** of its own (one project per app is the family's rule, so a
-   rules mistake in one app can never reach another). Add a *web app* to it and copy the
-   `firebaseConfig` object into `FIREBASE_CONFIG`.
-2. **Authentication → Sign-in method:** enable **Anonymous** and nothing else. (This is the
-   opposite of League Night's instruction, on purpose — `CLAUDE.md` says why.)
-3. **Authentication → Settings → Authorized domains:** add `eagleadams86.github.io`.
-4. **Firestore Database:** create it in production mode, then **Rules → paste
-   `firestore.rules` from this repo → Publish.** Do this before the first room is opened.
-5. **Firestore Database → Time-to-live:** add a TTL policy on the field `expiresAt` for each
-   of the collection groups `rooms`, `players`, `answers` and `live`. This is what deletes a
-   finished room; the rules refuse an expired one long before the deletion runs.
-6. **Google Cloud Console → Billing → Budgets & alerts:** a budget alert on the project (the
-   drawing game, when it arrives, can exceed the free tier's 50,000 reads a day on a long
-   night — the alert is the control).
-7. **Google Cloud Console → APIs & Services → Credentials → the browser API key:** under
-   *Application restrictions* choose HTTP referrers and add `https://eagleadams86.github.io/*`
-   and `http://localhost:8026/*`. A speed bump against casual reuse of the public config, not
-   a boundary — the rules are the boundary.
+   rules mistake in one app can never reach another), with Gemini and Google Analytics
+   turned off. Add a *web app* to it and copy the `firebaseConfig` object into
+   `FIREBASE_CONFIG`. *Done — `BreakRoom`, web app "Break Room (web)".*
+2. **Authentication → Sign-in method:** enable **Anonymous** and nothing else, with *auto
+   clean-up* on (anonymous accounts older than 30 days are deleted, which is also what keeps
+   them off the usage quota). This is the opposite of League Night's instruction, on purpose
+   — `CLAUDE.md` says why. *Done.*
+3. **Authentication → Settings → Authorized domains:** add `eagleadams86.github.io`. *Done.*
+4. **Firestore Database:** create it (Standard edition, `nam5` United States, production
+   mode), then **Rules → paste `firestore.rules` from this repo → Publish.** Do this before
+   the first room is opened. The file is ASCII-only on purpose: a paste once mangled its
+   UTF-8 punctuation, and the file must match the console byte for byte. *Done.*
+5. **Firestore → Time-to-live (in the Google Cloud console):** a TTL policy on the field
+   `expiresAt` for each of the collection groups `rooms`, `players`, `answers` and `live`.
+   **Not done — TTL policies need the pay-as-you-go Blaze plan, and the project is on
+   Spark.** Until that changes, a finished room is NOT deleted by Firestore: the rules refuse
+   an expired room, the host closes the room when the last person leaves, and everyone's
+   own records go when they leave, so what is left behind is only rooms people abandoned
+   without pressing Leave — small documents, well inside the free 1 GiB. Set the four
+   policies the day the project moves to Blaze.
+6. **Budget alert** (Google Cloud → Billing): the control for a heavy drawing night.
+   **Not done — also needs a billing account.** On Spark there is nothing to bill; the free
+   tier simply stops answering when a day's 50,000 reads are used up.
+7. **API key referrer restriction** (Google Cloud → APIs & Services → Credentials → the
+   browser key → Websites): `https://eagleadams86.github.io/*` and `http://localhost:8026/*`.
+   A speed bump against casual reuse of the public config, not a boundary — the rules are
+   the boundary. *Done.*
 8. Commit `FIREBASE_CONFIG`. The family's existing API-key alerts on GitHub are closed as
-   won't-fix for exactly this reason; see memory before "fixing" one.
+   won't-fix for exactly this reason; see memory before "fixing" one. *Done.*
 
 The kill switch, if a room is ever abused: **Authentication → Sign-in method → Anonymous →
 disable.** Every door closes at once, nothing is lost, and the rules can be tightened in the
 console without a deploy.
+
+Checking the console side from a terminal, without opening it (nothing here is a secret):
+
+```bash
+curl -s "https://identitytoolkit.googleapis.com/v1/projects?key=AIzaSyA_3hjhtgpdyLMN6M4sdUiqmkcBcLBRxDw"
+```
+
+Healthy: a JSON body whose `authorizedDomains` includes `eagleadams86.github.io`.
+
+**First real run, 27 October 2026:** a room opened from one browser and joined from another
+by its invite link, both anonymous; a ten-question game with answers from both sides scored
+by the server's clock (133 and 111 after one question each); the host's page reloaded
+mid-game and rejoined as host with the game still moving. The three-minute handoff and the
+hidden-tab countdown were checked the same afternoon — see `CLAUDE.md`.
 
 ## Testing It With More Than One Person
 

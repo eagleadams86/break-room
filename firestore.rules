@@ -1,10 +1,12 @@
 rules_version = '2';
 
-// Security rules for Break Room's Firestore database.
+// Security rules for Break Room's Firestore database. ASCII only, on purpose:
+// a paste into the console editor mangled UTF-8 punctuation once (2026-10-27),
+// and the file must match the console byte for byte.
 //
 // This file is a checked-in copy of what should be deployed in the Firebase
-// console (Firestore Database → Rules). Nothing in this repo deploys it — there
-// is no Firebase CLI setup here and the app is a single static page — so if the
+// console (Firestore Database -> Rules). Nothing in this repo deploys it - there
+// is no Firebase CLI setup here and the app is a single static page - so if the
 // rules are ever changed in the console, update this file to match. (Same
 // pattern as league-night, golf-handicap, paptrack and financial-plan.)
 //
@@ -13,8 +15,8 @@ rules_version = '2';
 // home card fails) or, in test mode, allow every signed-in user to read and
 // write everything.
 //
-// THE MODEL, IN ONE PARAGRAPH. Everyone signs in ANONYMOUSLY — no Google
-// account, no email, nothing that identifies a person across nights — so
+// THE MODEL, IN ONE PARAGRAPH. Everyone signs in ANONYMOUSLY - no Google
+// account, no email, nothing that identifies a person across nights - so
 // `signedIn()` is FREE and never sufficient on its own. Knowing a room's
 // six-character code is the READ capability: any signed-in client may `get`
 // a room by its code while the room is unexpired, and NOBODY can `list` the
@@ -22,7 +24,7 @@ rules_version = '2';
 // hint. The HOST is a field on the room document and the host's browser is
 // the only writer of that document: every update must raise `rev` by exactly
 // one, which makes "every write is a transaction" a fact the server checks.
-// PLAYERS write only their own documents — a presence record and an answer —
+// PLAYERS write only their own documents - a presence record and an answer -
 // and the server checks that each carries a `serverTimestamp()` sentinel, so
 // a clock a client made up never reaches another player's screen.
 //
@@ -71,11 +73,11 @@ service cloud.firestore {
       // index.html (tests.html pins the pairs), and what they bound is the
       // COUNT, so that no single write can hand every player's browser a
       // million-element list to normalize and draw:
-      //   scores ≤ 32 keys     — the room's running total, one per uid ever in it
-      //   feed   ≤ 20 entries  — overwritten each turn, never a log
-      //   pack   ≤ 60 questions — a custom trivia pack, copied onto the room
-      //   cards  ≤ 40, words == 25 — the later games' lists, capped from day one
-      // `size()` on a non-list is an evaluation ERROR, which denies — so the
+      //   scores <= 32 keys     - the room's running total, one per uid ever in it
+      //   feed   <= 20 entries  - overwritten each turn, never a log
+      //   pack   <= 60 questions - a custom trivia pack, copied onto the room
+      //   cards  <= 40, words == 25 - the later games' lists, capped from day one
+      // `size()` on a non-list is an evaluation ERROR, which denies - so the
       // type checks stay AHEAD of the size checks, and `pack` and the two game
       // lists are guarded on presence first, because `size()` on a missing key
       // is the same error and would refuse every room that has no pack.
@@ -110,7 +112,7 @@ service cloud.firestore {
 
       // Knowing the code, while the room is live, is the read capability.
       allow get:    if signedIn() && resource.data.expiresAt > request.time;
-      // The code must never be enumerable — this line IS the access model.
+      // The code must never be enumerable - this line IS the access model.
       allow list:   if false;
       // Anyone signed in may open a room, as its host, at rev 0. Bounded by
       // validRoom and everything the header of this file lists.
@@ -120,7 +122,7 @@ service cloud.firestore {
       allow update: if signedIn() && validRoom(request.resource.data)
                     && request.resource.data.rev == resource.data.rev + 1
                     && (
-                         // (1) THE HOST, writing anything — the game engine runs in
+                         // (1) THE HOST, writing anything - the game engine runs in
                          //     the host's browser and this is its transaction. The
                          //     host may keep the room or HAND IT to any player who
                          //     is present (a host pressing Leave does this before
@@ -132,7 +134,7 @@ service cloud.firestore {
                           && (request.resource.data.host == me()
                               || exists(playerPath(request.resource.data.host))))
                          // (2) THE HANDOFF: a PLAYER taking the host's seat, and
-                         //     ONLY that — `host` and `rev` are the whole diff —
+                         //     ONLY that - `host` and `rev` are the whole diff -
                          //     only when the old host is stale, and only by somebody
                          //     who is actually in the room. The client picks the
                          //     longest-present online player; the server cannot
@@ -150,12 +152,12 @@ service cloud.firestore {
       // TTL takes whatever is left.
       allow delete: if signedIn() && resource.data.host == me();
 
-      // ── One document per player: presence and "how far I have answered" ──
+      // -- One document per player: presence and "how far I have answered" --
       match /players/{uid} {
         // `seenAt == request.time` is how rules verify a serverTimestamp()
         // sentinel: the server resolves the sentinel to request.time before
         // evaluating, and no client can produce a value equal to a time it
-        // does not know. That is what makes presence UN-FORGEABLE — a player
+        // does not know. That is what makes presence UN-FORGEABLE - a player
         // cannot claim to be online, and a stale host cannot pretend not to
         // be. The cost: EVERY write to this document, a heartbeat or an
         // answer's ansR, must carry a fresh sentinel. The client does.
@@ -171,7 +173,7 @@ service cloud.firestore {
         }
         // Everyone in a live room draws the roster.
         allow read:           if signedIn() && roomLive();
-        // A player writes only their own record, and only into a live room —
+        // A player writes only their own record, and only into a live room -
         // which is what stops a room being joined after it has ended.
         allow create, update: if signedIn() && me() == uid && roomLive()
                               && validPlayer(request.resource.data);
@@ -179,10 +181,10 @@ service cloud.firestore {
         allow delete:         if signedIn() && (me() == uid || isHost());
       }
 
-      // ── One document per player: this round's answer ──────────────────────
+      // -- One document per player: this round's answer ----------------------
       match /answers/{uid} {
-        // A string, an int or a short list — each game's `encode()` decides
-        // which. Rules cannot iterate a list, so the ≤60-character cap on
+        // A string, an int or a short list - each game's `encode()` decides
+        // which. Rules cannot iterate a list, so the <=60-character cap on
         // EACH ELEMENT of a three-line answer is CLIENT-SIDE ONLY
         // (normalizeAnswers in index.html); the server bounds the list's
         // length and the string's. `at == request.time` is the same sentinel
@@ -197,7 +199,7 @@ service cloud.firestore {
         // HOST-READ ONLY. An answer is secret until the host's reveal puts
         // it on the room document, and a player must not be able to read
         // the room's answers while the question is open. The host is the one
-        // client that needs them, and the host is whoever `room.host` names —
+        // client that needs them, and the host is whoever `room.host` names -
         // which is why a handed-off host can continue mid-round.
         allow get, list:      if isHost();
         // Only somebody who has JOINED may answer: knowing the code is not
@@ -208,7 +210,7 @@ service cloud.firestore {
         allow delete:         if signedIn() && (me() == uid || isHost());
       }
 
-      // ── The live documents the later games need ───────────────────────────
+      // -- The live documents the later games need ---------------------------
       // Written from day one so the rules file does not need a widening
       // deploy per milestone. Nothing in the client touches either until the
       // drawing game (strokes) and the icebreakers / Codenames (key) arrive.
