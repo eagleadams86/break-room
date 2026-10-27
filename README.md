@@ -2,7 +2,7 @@
 
 A room your team drops into beside the Teams or Zoom call you already have open. Pick a
 nickname, start a room or join one with its six-letter code, see who's around, and let the
-host run a round of trivia while everyone talks. No account, nothing to install, and
+host run a round of trivia or a drawing game while everyone talks. No account, nothing to install, and
 everything in a room is deleted within a day.
 
 **Live: https://eagleadams86.github.io/break-room/** · **Privacy:** [privacy.html](https://eagleadams86.github.io/break-room/privacy.html)
@@ -14,6 +14,40 @@ anything from a work system. The plan is in
 decides that the rest of the family has not.
 
 ## What It Does Today
+
+**Milestone 3 — drawing & guess (27 October 2026).** One person draws, everyone else
+types guesses:
+
+- **The host picks Drawing & Guess** in the lobby, how many rounds (everyone draws once a
+  round) and how long a drawing lasts (60, 75 or 90 seconds). Beside the choice is an
+  estimate of what the night costs in cloud reads against the free plan's 50,000 a day, and
+  it turns amber when one evening could use most of it.
+- **The drawer is offered three words** from a list of 563 and has ten seconds to choose (the
+  browser chooses the first if they don't). Then a canvas, six ink colours from the theme,
+  an eraser, four line widths and Clear. Everyone else sees the drawing appear about a third
+  of a second behind the pen, the word as blanks, and a letter given away at 40% and 67% of
+  the time.
+- **Guesses go into a list everyone can see** — except a right one, which only ever shows as
+  "Ben got it". A guess is checked on letters only ("Ice-cream!" is "ice cream"), and a right
+  word inside a sentence counts ("is it a cat?"), so a right answer can never land in the
+  list for everyone to read.
+- **Points:** 100 plus up to 100 for speed for each player who gets it, timed by the
+  server's clock, and 50 to the drawer for every one of them. The turn ends when everyone
+  online has it, or at the buzzer; six seconds show the word and what it paid; then the
+  next person draws. Someone who joins mid-game draws at the end of the round.
+- **The host is a guesser too, and never sees the word.** The drawer's browser sends a
+  one-way fingerprint of the word (SHA-256), not the word, and the host's browser checks
+  each guess against it. The word reaches the room only at the end of the turn. A host who
+  opened the browser's developer tools could work it out — this hides the word from the
+  screen, not from a determined cheat, which is the right bar for a party game.
+- **A late joiner sees the whole drawing at once**: every stroke of a turn lives in one
+  small document, so arriving is one read.
+- **The demo room draws too:** the invented players take turns doodling (a sun, a house, a
+  heart…) and guessing at their own pace, so the whole game can be watched alone.
+
+Also fixed on the way: in the demo room, the cloud's sign-in finishing a moment after the
+room opened took the host's seat away from you; two demo nicknames lost their closing
+bracket to the 20-character cap; and an avatar read "P(" for "Priya (online)".
 
 **Milestone 2 — trivia (27 October 2026).** The first game, and the shape the next three
 follow:
@@ -71,9 +105,9 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (131 tests as of milestone 2).
+clause by clause, and a suite with a floor (163 tests as of milestone 3).
 
-**Coming next:** drawing & guess (milestone 3), icebreakers (4), Codenames (5), and last
+**Coming next:** icebreakers (milestone 4), Codenames (5), and last
 of all Google sign-in for a standing house with a cross-night leaderboard (6).
 
 ## How a Room Works
@@ -155,6 +189,12 @@ mid-game and rejoined as host with the game still moving; and when the host's ta
 for three minutes, the other player's browser took the seat and ran the rest of the game.
 The hidden-tab countdown is pinned by a test but has not yet been watched on a real
 backgrounded tab.
+
+**Drawing against the real cloud, 27 October 2026:** three separate browser profiles (three
+anonymous players) on `localhost:8026`. The drawer's first stroke reached the host's screen
+**0.3 seconds** after the pen went down; the host, guessing, never had the word on screen; a
+third player who joined mid-turn got the whole drawing in one read; their guess list showed
+"Ann got it" and Ann's wrong guess, never the word; and nothing was refused by the rules.
 
 ## Testing It With More Than One Person
 
