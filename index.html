@@ -2082,51 +2082,53 @@ let myPick = { round: 0, v: null };
    read. Every watcher parses every string with a strict regex and drops
    anything that fails; nothing from that document is ever put in the page as
    markup — it only becomes canvas paths. */
-const DRAW_WORDS = (''
-  + 'accordion,acorn,airplane,alarm clock,alien,ambulance,anchor,angel,ant,ant hill,apple,apron,archery,'
-  + 'arrow,artist,astronaut,axe,backpack,bacon,baker,balcony,balloon,banana,banjo,barn,baseball,'
-  + 'basketball,bat,bathtub,battery,beach,bear,beard,beaver,bed,bee,beehive,bell,belt,bench,bicycle,'
-  + 'bird cage,bird nest,birthday,birthday cake,blanket,blender,boat,bone,book,bookshelf,boot,bottle,'
-  + 'bow tie,bowl,bowling,boxing,brain,bread,bridge,broccoli,broom,broomstick,bucket,burger,bus,butterfly,'
-  + 'button,cactus,cake,calculator,calendar,camel,camera,campfire,camping,candle,candy,cannon,canoe,car,'
-  + 'carousel,carpet,carrot,castle,castle wall,cat,caterpillar,cave,cereal,chair,cheese,cheetah,chef,'
-  + 'cherry,chess,chicken,chimney,chocolate,chopsticks,church,clock,cloud,clown,coat,cobweb,coffee,coin,'
-  + 'collar,comb,comet,compass,computer,cookie,corn,cow,cowboy,crab,crayon,credit card,crocodile,'
-  + 'croissant,crown,crystal ball,cup,cupcake,curtain,deer,dentist,desert,devil,dice,dinosaur,doctor,dog,'
-  + 'dog house,dolphin,domino,donut,door,doorbell,dragon,dragon egg,dragonfly,drawer,dress,drill,drum,'
-  + 'duck,dumbbell,eagle,ear,earring,easel,egg,elephant,elevator,envelope,eraser,eye,farmer,fence,'
-  + 'ferris wheel,finger,fire,fire truck,firefighter,fireworks,fish,fish bowl,fishing,flag,flamingo,'
-  + 'flashlight,flower,flute,food truck,foot,football,forest,fork,fountain,fox,french fries,fridge,'
-  + 'frisbee,frog,garage,garden,gate,ghost,gift,giraffe,glasses,globe,glove,glue,goal,goat,golf,gorilla,'
-  + 'grapes,grass,greenhouse,guitar,hair,hair dryer,hairbrush,hammer,hamster,hamster wheel,hand,harp,hat,'
-  + 'headphones,heart,hedgehog,helicopter,helmet,hiking,hill,hippo,hockey,honey,honeycomb,horse,hospital,'
-  + 'hot air balloon,hot dog,hourglass,house,hurricane,ice cream,ice cream truck,icicle,igloo,island,'
-  + 'jacket,jam,jar,jellyfish,juice,jump rope,jungle,kangaroo,karate,kennel,kettle,key,keyboard,king,kite,'
-  + 'knife,knight,koala,ladder,ladybug,lake,lamp,laptop,lawn mower,leaf,leash,lemon,lemonade,leopard,'
-  + 'library,light bulb,lighthouse,lightning,lion,lipstick,lizard,lobster,lock,lollipop,magic wand,magnet,'
-  + 'mailbox,map,maracas,marshmallow,mask,mat,medal,mermaid,microphone,microwave,milk,mirror,mitten,money,'
-  + 'monkey,monster,moon,moose,mop,mosquito,motorcycle,mountain,mouse,mouth,movie theater,muffin,mug,'
-  + 'mummy,muscle,museum,mushroom,nail,nail polish,necklace,net,ninja,noodles,north pole,nose,notebook,'
-  + 'ocean,octopus,onion,orange,origami,otter,oven,owl,paint roller,paintbrush,pajamas,palm tree,pan,'
-  + 'pancake,panda,pants,paper,paper airplane,paperclip,parachute,parrot,party,peacock,pear,peas,pen,'
-  + 'pencil,penguin,pepper,perfume,phone,piano,pie,pig,pigeon,piggy bank,pillow,pine tree,pineapple,'
-  + 'pinecone,pirate,pirate ship,pizza,planet,plate,pocket,polar bear,police car,police officer,popcorn,'
-  + 'popsicle,pot,potato,potion,pretzel,princess,printer,puddle,pumpkin,purse,puzzle,pyramid,queen,rabbit,'
-  + 'raccoon,radio,rain,rainbow,rake,rat,razor,remote control,rhino,ring,river,robot,rock,rocket,'
-  + 'roller coaster,roof,rose,ruler,sailboat,salad,sand castle,sandal,sandbox,sandwich,satellite,sausage,'
-  + 'saw,saxophone,scarecrow,scarf,school,scissors,scooter,screw,screwdriver,seal,seesaw,shark,sheep,'
-  + 'shell,shield,ship,shipwreck,shirt,shoe,shopping cart,shovel,shower,sink,skateboard,skeleton,skiing,'
-  + 'skirt,skull,skunk,skyscraper,sled,sleeping bag,slide,smile,smoke,snail,snake,snow,snowboard,'
-  + 'snowflake,snowman,soap,soccer ball,sock,sofa,soup,spaceship,speaker,spellbook,spider,spider web,'
-  + 'spoon,squirrel,stairs,stamp,stapler,star,starfish,statue,stop sign,strawberry,submarine,sun,sundial,'
-  + 'sunflower,sunglasses,surfing,sushi,swan,sweater,swimming,swimsuit,swing,swing set,sword,table,tablet,'
-  + 'taco,tape,taxi,tea,teacher,teapot,tear,telescope,television,tennis,tent,thumb,thunderstorm,ticket,'
-  + 'tiger,tire,toast,toaster,toilet,tomato,toolbox,tooth,toothbrush,toothpaste,tornado,towel,tower,'
-  + 'tractor,traffic light,train,tram,trampoline,treadmill,treasure chest,treasure map,tree,trophy,truck,'
-  + 'trumpet,tulip,turtle,umbrella,unicorn,vacuum,vampire,van,vase,violin,volcano,waffle,wall,wallet,'
-  + 'watch,waterfall,watering can,watermelon,wave,wedding,wedding cake,whale,wheel,wheelbarrow,whistle,'
-  + 'wig,windmill,window,witch,wizard,wolf,worm,wreath,wrench,xylophone,yo yo,yoga,zebra,zipper,zombie'
-).split(',');
+/* One template string, cut into words on commas and line ends — not a chain of
+   '+'-joined pieces, which CodeQL reads as words missing a space between them. */
+const DRAW_WORDS = `
+  accordion,acorn,airplane,alarm clock,alien,ambulance,anchor,angel,ant,ant hill,apple,apron,archery
+  arrow,artist,astronaut,axe,backpack,bacon,baker,balcony,balloon,banana,banjo,barn,baseball
+  basketball,bat,bathtub,battery,beach,bear,beard,beaver,bed,bee,beehive,bell,belt,bench,bicycle
+  bird cage,bird nest,birthday,birthday cake,blanket,blender,boat,bone,book,bookshelf,boot,bottle
+  bow tie,bowl,bowling,boxing,brain,bread,bridge,broccoli,broom,broomstick,bucket,burger,bus,butterfly
+  button,cactus,cake,calculator,calendar,camel,camera,campfire,camping,candle,candy,cannon,canoe,car
+  carousel,carpet,carrot,castle,castle wall,cat,caterpillar,cave,cereal,chair,cheese,cheetah,chef
+  cherry,chess,chicken,chimney,chocolate,chopsticks,church,clock,cloud,clown,coat,cobweb,coffee,coin
+  collar,comb,comet,compass,computer,cookie,corn,cow,cowboy,crab,crayon,credit card,crocodile
+  croissant,crown,crystal ball,cup,cupcake,curtain,deer,dentist,desert,devil,dice,dinosaur,doctor,dog
+  dog house,dolphin,domino,donut,door,doorbell,dragon,dragon egg,dragonfly,drawer,dress,drill,drum
+  duck,dumbbell,eagle,ear,earring,easel,egg,elephant,elevator,envelope,eraser,eye,farmer,fence
+  ferris wheel,finger,fire,fire truck,firefighter,fireworks,fish,fish bowl,fishing,flag,flamingo
+  flashlight,flower,flute,food truck,foot,football,forest,fork,fountain,fox,french fries,fridge
+  frisbee,frog,garage,garden,gate,ghost,gift,giraffe,glasses,globe,glove,glue,goal,goat,golf,gorilla
+  grapes,grass,greenhouse,guitar,hair,hair dryer,hairbrush,hammer,hamster,hamster wheel,hand,harp,hat
+  headphones,heart,hedgehog,helicopter,helmet,hiking,hill,hippo,hockey,honey,honeycomb,horse,hospital
+  hot air balloon,hot dog,hourglass,house,hurricane,ice cream,ice cream truck,icicle,igloo,island
+  jacket,jam,jar,jellyfish,juice,jump rope,jungle,kangaroo,karate,kennel,kettle,key,keyboard,king,kite
+  knife,knight,koala,ladder,ladybug,lake,lamp,laptop,lawn mower,leaf,leash,lemon,lemonade,leopard
+  library,light bulb,lighthouse,lightning,lion,lipstick,lizard,lobster,lock,lollipop,magic wand,magnet
+  mailbox,map,maracas,marshmallow,mask,mat,medal,mermaid,microphone,microwave,milk,mirror,mitten,money
+  monkey,monster,moon,moose,mop,mosquito,motorcycle,mountain,mouse,mouth,movie theater,muffin,mug
+  mummy,muscle,museum,mushroom,nail,nail polish,necklace,net,ninja,noodles,north pole,nose,notebook
+  ocean,octopus,onion,orange,origami,otter,oven,owl,paint roller,paintbrush,pajamas,palm tree,pan
+  pancake,panda,pants,paper,paper airplane,paperclip,parachute,parrot,party,peacock,pear,peas,pen
+  pencil,penguin,pepper,perfume,phone,piano,pie,pig,pigeon,piggy bank,pillow,pine tree,pineapple
+  pinecone,pirate,pirate ship,pizza,planet,plate,pocket,polar bear,police car,police officer,popcorn
+  popsicle,pot,potato,potion,pretzel,princess,printer,puddle,pumpkin,purse,puzzle,pyramid,queen,rabbit
+  raccoon,radio,rain,rainbow,rake,rat,razor,remote control,rhino,ring,river,robot,rock,rocket
+  roller coaster,roof,rose,ruler,sailboat,salad,sand castle,sandal,sandbox,sandwich,satellite,sausage
+  saw,saxophone,scarecrow,scarf,school,scissors,scooter,screw,screwdriver,seal,seesaw,shark,sheep
+  shell,shield,ship,shipwreck,shirt,shoe,shopping cart,shovel,shower,sink,skateboard,skeleton,skiing
+  skirt,skull,skunk,skyscraper,sled,sleeping bag,slide,smile,smoke,snail,snake,snow,snowboard
+  snowflake,snowman,soap,soccer ball,sock,sofa,soup,spaceship,speaker,spellbook,spider,spider web
+  spoon,squirrel,stairs,stamp,stapler,star,starfish,statue,stop sign,strawberry,submarine,sun,sundial
+  sunflower,sunglasses,surfing,sushi,swan,sweater,swimming,swimsuit,swing,swing set,sword,table,tablet
+  taco,tape,taxi,tea,teacher,teapot,tear,telescope,television,tennis,tent,thumb,thunderstorm,ticket
+  tiger,tire,toast,toaster,toilet,tomato,toolbox,tooth,toothbrush,toothpaste,tornado,towel,tower
+  tractor,traffic light,train,tram,trampoline,treadmill,treasure chest,treasure map,tree,trophy,truck
+  trumpet,tulip,turtle,umbrella,unicorn,vacuum,vampire,van,vase,violin,volcano,waffle,wall,wallet
+  watch,waterfall,watering can,watermelon,wave,wedding,wedding cake,whale,wheel,wheelbarrow,whistle
+  wig,windmill,window,witch,wizard,wolf,worm,wreath,wrench,xylophone,yo yo,yoga,zebra,zipper,zombie
+`.split(/[,\n]/).map((w) => w.trim()).filter(Boolean);
 const PICK_MS = 10000;
 const PICK_GRACE_MS = 5000;      /* the drawer's own browser auto-picks at 10 s; this covers one that has gone */
 const TURN_END_MS = 6000;
