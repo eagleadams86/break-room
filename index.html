@@ -1,0 +1,2061 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     BREAK ROOM — a room a team drops into beside the call it already has open.
+
+     Built from the family starter (~/claude-starter) on 2026-10-27. Everything
+     the starter carries — the CSP, the Auto theme default, the data-booting
+     gate, the header row and its scroll arrows, the dialogs, the toast, the
+     help window and info dot, Back Up and the delete-all window, the service
+     worker, the SCHEMA halt and the test harness — is the family's, and the
+     comments beside each block say so. CLAUDE.md records only what THIS app
+     decides that the family has not; README.md says what it does.
+
+     data-theme="auto" on <html> is the first rule of many. :root in theme.css is
+     MIDNIGHT, so a page with no attribute and no script opens dark on a light
+     system. This attribute and the boot script below are two separate answers to
+     that, and an app needs both — pack rule 6.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="UTF-8">
+<!-- ── Content Security Policy ───────────────────────────────────────────────
+     GitHub Pages cannot set response headers, so this meta tag is the only place
+     a policy can be declared — and it still applies over file://.
+
+     IT STARTS AT 'none'. Every page on eagleadams86.github.io shares ONE browser
+     origin, and with it the localStorage of every other app, including the two
+     holding figures copied from work. Any page on the origin can read that data,
+     so these apps are only as safe as the least hardened page.
+
+     THE ONLY OFF-ORIGIN SCRIPT IS THE FIREBASE SDK, from www.gstatic.com, which
+     League Night already accepts on this origin — the family's one exception, and
+     it is loaded by a dynamic import() inside the module at the foot of the page,
+     never by a <script src>. connect-src names the three Google endpoints a room
+     needs and NOTHING on firebaseapp.com: the corporate filter that blocks that
+     hostname is the whole reason this app signs in anonymously (see the module).
+     accounts.google.com arrives only with the last milestone (Google sign-in for
+     a standing "house"), and only then does frame-src appear.
+
+     tests.html pins this host list exactly, so a new endpoint is a decision that
+     fails a test before it ships. manifest-src and worker-src are SPELLED OUT
+     rather than left to fall back: manifest-src falls back to default-src, which
+     is 'none', so without it Install silently stops being offered; worker-src
+     would otherwise fall through to script-src and inherit gstatic.
+
+     'unsafe-inline' is unavoidable: a single-file app, no build step, no hashes.
+     form-action is 'self' because dialogs submit with method="dialog".
+     frame-ancestors is ignored in a meta tag; it needs a real header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- NEVER maximum-scale=1 or user-scalable=no. They stop iOS zooming on a
+     focused field by taking pinch-zoom from everyone, which is an accessibility
+     loss, and modern iOS ignores them anyway. The pack fixes it properly, by
+     flooring form controls at 16px on a coarse pointer (rule 11). -->
+<title>Break Room</title>
+<meta name="description" content="A room your team drops into with a nickname and a six-letter code: see who is around and play trivia together beside the call you already have open.">
+<meta name="mobile-web-app-capable" content="yes">
+<!-- Both stay: Chrome warns the apple- prefixed one is deprecated, older iOS
+     reads only the apple- one. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Break Room">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- The mark, on the family tile: midnight page as a rounded square, the soft
+     disc in a corner, and THREE DOTS IN A ROW in the accent gradient — the
+     online dots the roster draws, which is the one thing on screen that says
+     somebody is here. It exists TWICE — here as an inline SVG data URI (what
+     every current browser shows in the tab, and it needs no sibling file so it
+     survives file://) and as favicon.ico (the fallback a browser fetches from the
+     site root on its own, and what a bookmark uses). make_icons.py draws both
+     from the same geometry; keep them one picture, and bump ?v= on EVERY
+     reference — privacy.html included — when it is re-run, or the old icon
+     stays cached for months. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='10' y1='52' x2='54' y2='12' gradientUnits='userSpaceOnUse'><stop offset='0' stop-color='%23818cf8'/><stop offset='1' stop-color='%23a5b4fc'/></linearGradient></defs><rect width='64' height='64' rx='14' fill='%230a0e1a'/><circle cx='50' cy='14' r='18' fill='%23141c33'/><circle cx='17' cy='32' r='7' fill='url(%23g)'/><circle cx='32' cy='32' r='7' fill='url(%23g)'/><circle cx='47' cy='32' r='7' fill='url(%23g)'/></svg>">
+<link rel="alternate icon" href="favicon.ico?v=2">
+<!-- The manifest turns Chrome's "Install page as app…" into a real install: its
+     own window, its own Dock/taskbar icon, its own entry in the app switcher.
+     Offline is a SEPARATE, older thing — that is sw.js at the foot of this file.
+     Four things must stay in step or install silently stops being offered:
+     manifest-src in the CSP above, the three PNGs make_icons.py writes, the
+     entries on sw.js's SHELL allowlist, and this link. Deliberately NOT linked
+     from privacy.html: a policy page is not a surface anyone installs from. -->
+<link rel="manifest" href="manifest.webmanifest">
+<!-- The installed window's title bar, and Android's address bar. Midnight's page
+     colour to start with; applyThemeColor() rewrites it so the bar follows the
+     theme instead of staying dark behind a light page. -->
+<meta name="theme-color" content="#0a0e1a">
+<script>
+  /* ── Everything that must be decided BEFORE first paint ───────────────────
+     Inline, in <head>, and deliberately not at the foot of the file. Anything
+     decided down there arrives AFTER the first paint: the theme as a flash of
+     the wrong colours. CSS keyed off these attributes does the switching.
+
+     THE THEME. Auto is the default (pack rule 6): nothing saved lands there, and
+     so does a retired id, so a first run follows the reader's own system rather
+     than opening midnight on a light machine. 'slate' is the old name for Dark
+     and is the ONE id that maps to a palette rather than to the default — same
+     palette renamed, so sending it to Auto would change what a reader sees.
+
+     Do not "tidy" this by normalising unknown ids to midnight BEFORE checking
+     for auto. That is the documented way to get Auto wrong and it fails
+     silently: the picker offers Auto and the page ignores it. */
+  (function () {
+  /* ── NOTHING BELOW THE HEADER IS PAINTED BEFORE THE FIRST render() ──────
+     (2026-09-12, swept across the family after Charles saw it in Money Map.)
+     Which screen is on — the home card or a room — is decided by render(), and
+     the browser paints the parsed body before the main script executes, so
+     first paint would be the home card and then the FOOTER immediately under
+     it, flashing at the top of the page on every refresh.
+
+     Same reasoning as the theme just below: a thing settled a frame late is a
+     page that visibly jumps as it opens. Three details it cannot do without:
+
+       • SET HERE, before anything that can throw. A browser that refuses
+         localStorage throws on the theme read below — and that is the browser
+         most likely to be slow enough to show the flash in the first place.
+       • `visibility`, NEVER `display: none` — see the rule in the stylesheet.
+         render() runs while this is on and has to measure a REAL layout.
+       • The DOMContentLoaded backstop below, so a script that dies on the way
+         to the release can never leave the page blank.
+
+     Released in the same task as the first render; search `data-booting`. */
+  document.documentElement.dataset.booting = 'on';
+  document.addEventListener('DOMContentLoaded', function () {
+    document.documentElement.removeAttribute('data-booting');
+  }, { once: true });
+    var t = localStorage.getItem('break-room-theme');
+    if (t === 'slate') t = 'dark';
+    var valid = ['auto', 'midnight', 'dark', 'light', 'sepia'];
+    if (valid.indexOf(t) === -1) t = 'auto';
+    document.documentElement.setAttribute('data-theme', t);
+    /* And the title bar with it. The literal in the meta above is Midnight's,
+       and Auto resolves to LIGHT on a light system — without this an installed
+       window opens with a midnight bar over a light page until the foot script
+       runs. matchMedia is answerable this early; --bg is not, because theme.css
+       has not loaded. Keep this one value in step with theme.css's Light --bg. */
+    if (t === 'auto' && !matchMedia('(prefers-color-scheme: dark)').matches) {
+      var bar = document.querySelector('meta[name="theme-color"]');
+      if (bar) bar.setAttribute('content', '#ebebe8');
+    }
+  })();
+</script>
+<!-- ── The palette, LINKED and never inlined ─────────────────────────────────
+     Copied byte-for-byte from ~/claude-theme-pack. Linking rather than pasting
+     is what lets a pack change reach this app by replacing one file; an inlined
+     copy is drift with a delay fuse. It also costs the four REAL rules the file
+     carries beyond the tokens: text-size-adjust, the 16px control floor on
+     touch, appearance:none on date fields, and the print palette.
+
+     This <style> comes AFTER the link on purpose: the rules below legitimately
+     add tokens of their own, and a later sheet wins. -->
+<link rel="stylesheet" href="theme.css">
+<style>
+  /* ── Which way round the page is ────────────────────────────────────────────
+     `color-scheme` moved INTO the pack on 2026-09-12 (rule 18). theme.css emits
+     it on every palette block — :root, each [data-theme], BOTH halves of auto,
+     and the print block — derived from each theme's `isLight` in tokens.json, so
+     it follows the PALETTE and not the theme's name. This page declared its own
+     until then; don't start again, a local block is drift now.
+
+     AUTO STILL NEEDS BOTH HALVES for anything this page INVENTS. theme.css
+     resolves Auto for its own palette and properties; it cannot resolve a token
+     declared here. Sprint Velocity had ten local tokens and no Auto
+     block at all, which meant light chart colours on a midnight card as its
+     first-run default — silent, and only visible on a dark system with an
+     untouched picker. IF YOU ADD A PER-THEME TOKEN BELOW, GIVE IT AN AUTO
+     ANSWER. Better still, alias a pack token and inherit Auto for free. */
+
+  /* ── The app's own measurements ─────────────────────────────────────────────
+     Not colours, so not the pack's business.
+
+     THERE ARE TWO PAGE WIDTHS IN THIS FAMILY AND A NEW APP PICKS ONE OF THEM.
+     1500px is the default and what this starts on — Sprint Predictability, Flow
+     Metrics, Golf Handicap and both lottery pages. 2400px is the ultra-wide, for
+     a page whose content genuinely fills it: Money Map's year-by-year grid,
+     PAPTrack, the dashboard. **Don't invent a third.** This file carried 1100
+     for a day, reasoning that a narrow table goes gappy stretched to 1500 — which
+     is a real effect and still the wrong answer, because it makes the shell the
+     one page in the family at a width nothing else uses. If a table looks sparse,
+     that is a fact about the table.
+
+     --page-w is read by BOTH .wrap and .headbar and they must stay the same
+     number, or the brand stops lining up with the left edge of the first card.
+     That is the whole reason it is a token rather than two literals — Sprint
+     Predictability and Flow Metrics both still write 1500px twice.
+
+     The two control heights are here because a native <select> ignores
+     line-height and would otherwise sit shorter than a button with identical
+     padding. */
+  :root {
+    --chrome-h: 30px;    /* the header row: utilities, not the page's action */
+    --control-h: 38.5px; /* every button in the page body and in dialogs */
+    --page-w: 1500px;    /* the family's default; 2400px is the ultra-wide */
+  }
+
+  * { box-sizing: border-box; }
+
+  /* THE `hidden` ATTRIBUTE HAS TO BEAT A CLASS THAT SETS `display`, AND ON ITS
+     OWN IT DOESN'T. The browser's own `[hidden] { display: none }` lives in the
+     USER-AGENT stylesheet, and ANY author rule beats a UA rule whatever the
+     specificity — so a class that sets `display` cancels it and the element
+     stays on screen with `hidden` set. Nothing throws, nothing logs; the thing
+     is simply there. `!important` makes it independent of source order. This has
+     cost Golf Handicap twice. Start with it. */
+  [hidden] { display: none !important; }
+
+  /* ── Type ───────────────────────────────────────────────────────────────────
+     One shorthand carries weight, size, line height and family, all from the
+     pack. Never a raw px size below it and never a font stack of your own: a px
+     size opts that text out of the reader's own text-size setting, which is the
+     whole reason the ramp is in rem off a 16px root. Eleven public pages in this
+     family linked theme.css and then set their own 15px body on top, and every
+     gate stayed green — a hash proves the file arrived, nothing proves the page
+     uses it. */
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font: var(--fw-normal) var(--fs-base)/var(--lh-base) var(--font-sans);
+    /* text-size-adjust and font smoothing: theme.css (pack rules 7c and 10). */
+  }
+
+  /* A keyboard user's first stop. Off-screen until focused. */
+  .skip { position: absolute; left: -9999px; top: 0; z-index: 100; }
+  .skip:focus { position: fixed; left: 8px; top: 8px; padding: 8px 14px;
+                background: var(--surface); color: var(--text-primary);
+                border: 2px solid var(--focus-border); border-radius: var(--radius-sm);
+                text-decoration: none; font-weight: 600; }
+  main:focus { outline: none; }
+
+  /* ── The header, identical in every app in the family ───────────────────────
+     A sticky bar across the top, full-bleed, with an inner row held to the same
+     --page-w as .wrap. The horizontal gutter lives on .wrap/.headbar and NOT on
+     <body>, so the bar runs edge to edge behind it. .brand's `margin: 0 auto 0 0`
+     is what pushes the controls right, and .brand is deliberately NOT a flex row
+     — with a strapline on the end, flex makes the name and the strapline two
+     columns and the strapline then wraps inside its own narrow column on a phone
+     instead of running on below. */
+  header { position: sticky; top: 0; z-index: 20; background: var(--surface);
+           border-bottom: 1px solid var(--border); padding: 10px 0; margin-bottom: 20px;
+           /* Installed on an iPhone, the page runs UNDER the status bar
+              (black-translucent), so the bar clears the notch itself and its
+              own background fills the space — PAPTrack's line. */
+           padding-top: calc(10px + env(safe-area-inset-top)); }
+  /* The status bar's own band, painted in the header's colour and pinned. On a
+     phone the header is not sticky, so without this every scroll slid the page
+     under the clock and the battery (Wine Cellar, Charles's iPhone,
+     2026-10-23). Zero tall everywhere there is no notch. */
+  body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: 25;
+                 height: env(safe-area-inset-top); background: var(--surface); }
+  /* A KEYBOARD FOCUS NEVER LANDS UNDER THE PINNED BAR (2026-09-14). The
+     browser's own scroll to a focused control — Tab, and above all Shift+Tab
+     back up the page — lines it up with the top of the WINDOW, which is where
+     this bar sits; and a control wholly inside the band the bar covers counts
+     as visible, so it is not scrolled at all. Measured with the sample data:
+     every control put half above the window or behind the bar was focused
+     still behind it. `scroll-padding-top` tells the browser the top of the
+     window starts below the bar. The height is MEASURED (`--head-h`, written by
+     a ResizeObserver beside `wireScrollRow()`), because the bar changes depth
+     with the window, the zoom and the name wrapping; +8px keeps the focus ring
+     clear of its edge. Golf Handicap 8935363 is the reference. An app that
+     pins more chrome under the bar (Money Map's 📌) measures that too, as one
+     `--pin-clear`, and must not ALSO give controls a `scroll-margin-top` —
+     the two add together. */
+  html { scroll-padding-top: calc(var(--head-h, 0px) + 8px); }
+  .headbar { max-width: var(--page-w); margin: 0 auto; padding: 0 16px;
+             display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  /* The app name is --fs-md in EVERY app. That is the role contract (pack rule
+     7b): whatever wears a role in one app wears the same step in all of them,
+     which is what makes seven separate pages read as one application. */
+  .brand { margin: 0 auto 0 0; font-size: var(--fs-md); font-weight: var(--fw-bold);
+           letter-spacing: var(--ls-tight); }
+  .brand span { font-weight: var(--fw-normal); color: var(--text-secondary); }
+  .brand .mark { vertical-align: -4px; margin-right: 8px; border-radius: 5px; }
+  /* THE CONTROLS ARE ONE LINE THAT SCROLLS SIDEWAYS, AT EVERY WIDTH (Charles,
+     2026-09-14, family-wide: "should we just make them both always single line
+     side scrollers?" — a 705px desktop window had wrapped them to two lines).
+     Money Map is the reference implementation; this is its shape.
+     `.headrow` is the row and its arrows; `.headctl` is what scrolls. THE ROW
+     STAYS BESIDE THE NAME AND SCROLLS THERE (Charles, the same evening: "keep
+     buttons beside the name" — the first cut took the whole row onto a line of
+     its own the moment it did not fit, which in a 1100px Sprint Predictability
+     window left the name alone on a line above seven controls). So the row
+     takes whatever the name leaves (`flex: 1 1 0%`), its controls packed to the
+     right-hand end (`justify-content: flex-end` on the row, which never
+     overflows — the scroller inside it shrinks instead, so nothing is pushed out
+     of reach), and it only wraps under the name when that would leave it less
+     than 15rem: a phone or a window that narrow, where the name above and one
+     line of controls below is the better shape. On a window wide enough nothing
+     moves. Money Map 2c19e01 is the reference for this rule.
+     THE GAP IS DECLARED HERE and not inherited: a nested row does not get
+     `.headbar`'s 12px, which is how four apps that nested theirs all ended up at
+     8px in the 2026-08-23 sweep. Room for the focus ring on every side is 4px of
+     padding and a matching negative margin, so the box grows inward and no
+     control moves. No scrollbar: the arrows beside the row are the sign there
+     is more, and the thing a mouse can press — a mouse wheel does not scroll
+     sideways, and a Mac hides its bars. */
+  .headrow { display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+    flex: 1 1 0%; min-width: min(15rem, 100%); }
+  .headctl { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; flex: 0 1 auto;
+    min-width: 0; overflow-x: auto; padding: 4px; margin: -4px; scrollbar-width: none; }
+  .headctl::-webkit-scrollbar { display: none; }
+  .headctl > * { flex: 0 0 auto; }
+  .wrap { max-width: var(--page-w); margin: 0 auto; padding: 0 16px 64px; }
+
+  /* ── Buttons: Sprint Predictability's, transcribed ──────────────────────────
+     SV is the design lead for shared chrome, so these metrics are its verbatim
+     and a change here belongs there too. Two sizes only: --chrome-h for the
+     HEADER row, whose controls are utilities rather than the action the page is
+     asking for, and --control-h for everything in the page body and in dialogs.
+     Full-size buttons deliberately run a size above the header's; .link and
+     .rowbtn take the body size back, because they sit inside sentences and
+     tables rather than standing on their own.
+
+     A CONTROL'S BOUNDARY IS --border-control (pack rule 4b), never --border or
+     --border-strong. WCAG 1.4.11 asks 3:1 of the information that identifies a
+     component, and for a bordered button whose fill is barely distinguishable
+     from the page — every secondary button in this family — that information IS
+     the border. Never fix a weak control edge locally: that is the drift the
+     pack exists to prevent. */
+  /* The family's control reset, and the starter was the one app without it. A
+     button that does not inherit `font` keeps the UA's `line-height: normal`, so
+     it came out 38.5px — its --control-h floor — where the identical button in
+     the other five apps stands at 40. The header row is unaffected: --lh-base is
+     unitless, so a 13px chrome button computes 19.5px and still lands on its own
+     30px floor. */
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { background: var(--surface-alt); color: var(--text-primary);
+           border: 1px solid var(--border-control); border-radius: var(--radius-sm);
+           padding: 7px 12px; font-size: var(--fs-base); cursor: pointer;
+           min-height: var(--control-h); white-space: nowrap; }
+  button:hover { border-color: var(--text-muted); }
+  button.primary { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
+  button.danger { color: var(--err); border-color: var(--err); background: transparent; }
+  button.danger:hover { background: var(--err-bg); border-color: var(--err); }
+  button.link { background: none; border: none; color: var(--accent); padding: 0;
+                min-height: 0; font-size: inherit; text-decoration: underline; white-space: normal; }
+
+  /* A per-row action is a SQUARE, --chrome-h on a side — not a new number, it is
+     the height the header controls already use, and a row action is the same
+     class of thing. NEUTRAL at rest and red only on hover: a column of small
+     squares that are red before you touch them reads as a column of warnings.
+     Written as `button.icon-btn.danger` so it beats a plain `.danger` rule
+     further up the cascade, which is exactly the trap Golf Handicap hit.
+     Disabled dims by OPACITY rather than a greyed colour, so nothing invents a
+     palette value. */
+  .icon-btn { appearance: none; background: none; border: 1px solid var(--border-control);
+              color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer;
+              width: var(--chrome-h); height: var(--chrome-h); min-height: 0;
+              font-size: var(--fs-sm); line-height: 1; padding: 0; }
+  .icon-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+  button.icon-btn.danger { color: var(--text-muted); border-color: var(--border-control); background: none; }
+  button.icon-btn.danger:hover { color: var(--err); border-color: var(--err); background: none; }
+  .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .icon-btn:disabled:hover { color: var(--text-muted); border-color: var(--border-control); }
+  /* A name in a table is a button, and the base button rule says nowrap — so
+     the name column alone never wrapped and squeezed every other column
+     (Wine Cellar, 2026-10-24; fixed family-wide the same day). It wraps like
+     the text it is. */
+  .rowbtn { background: none; border: none; padding: 0; min-height: 0; color: inherit;
+            text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font: inherit;
+            white-space: normal; text-align: left; }
+
+  /* The header row alone is pinned to --fs-xs, and it stays there: chrome is
+     13px in every app and did NOT scale with the body when the pack's base moved
+     13px → 16px. Now that body IS --fs-base, the step below it is where
+     "smaller" lives. A select in the HEADER also wears the BUTTON palette rather
+     than the input one — the base field rule gives every dropdown --surface on
+     --input-border, which is right beside text fields and wrong beside five
+     buttons: it made the pickers read as dark holes in a row of raised controls.
+     `width: auto` is load-bearing too, undoing the base rule's `width: 100%`,
+     which otherwise makes the theme picker claim the whole line and drop the
+     header to two rows. */
+  .headbar button { min-height: var(--chrome-h); padding: 4px 9px; font-size: var(--fs-xs); }
+  .headbar select { min-height: var(--chrome-h); padding: 4px 9px; font-size: var(--fs-xs);
+                    background: var(--surface-alt); border-color: var(--border-control);
+                    width: auto; }
+  .headbar select:hover { border-color: var(--text-muted); }
+
+  /* ── The two arrows beside a scrolling row ─────────────────────────────────
+     The header's controls and the tab bar each carry a pair (2026-09-14). A
+     plain box that sets NO `display`, so `hidden` — which `wireScrollRow()` sets
+     whenever the row has nothing to scroll — still hides it.
+     The buttons are plain glyphs, not controls: the base `button` rule gives
+     every button a border, a surface and the --control-h floor, and
+     `.headbar button` another floor and padding, so this undoes both. Written
+     AFTER `.headbar button` on purpose — same specificity, so order decides. */
+  .rownav { flex: none; white-space: nowrap; }
+  .rownav button { background: none; border: 0; border-radius: var(--radius-sm);
+    padding: 4px 10px; min-height: auto; color: var(--text-secondary);
+    font-size: var(--fs-md); line-height: 1.1; }
+  .rownav button:hover:not(:disabled) { background: var(--surface-alt); color: var(--text-primary); }
+  .rownav button:disabled { opacity: .35; cursor: default; }
+  .rownav button:focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+  /* FOR A MOUSE OR A TRACKPAD ONLY. A finger swipes the row, which is all the
+     arrows stand in for — and in Money Map, on touch, they made a phone's header
+     taller and slid every control out of line. `!important` because
+     `wireScrollRow()` clears `hidden` whenever the row overflows; this keeps
+     them away regardless. */
+  @media (hover: none), (pointer: coarse) { .rownav { display: none !important; } }
+
+  :focus-visible { outline: 2px solid var(--focus-border); outline-offset: 2px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 18px; margin-bottom: var(--sp-6); }
+  /* A card heading is --fs-md, everywhere, and Title Case. Headings are Title
+     Case in every app in this family; body copy, buttons, table column headers
+     and field labels are not. The flex row is what lets a help button or a pill
+     sit on the same line as the heading. */
+  .card > h2 { margin: 0 0 var(--sp-5); font-size: var(--fs-md); font-weight: var(--fw-semibold);
+               display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+  .card > h2 .spacer { flex: 1 1 auto; }
+  .card.welcome { padding: 18px; }
+  .lede { color: var(--text-secondary); margin: 0 0 var(--sp-5); }
+  .hint { color: var(--text-secondary); font-size: var(--fs-xs); }
+  .muted { color: var(--text-secondary); }
+  .label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-label);
+           color: var(--text-muted); }
+
+  /* ── Tables ─────────────────────────────────────────────────────────────────
+     Rows are --fs-sm, headings --fs-xs with the label letter-spacing.
+     .table-scroll MUST carry `position: relative`. `overflow-x: auto` is the
+     whole design — content too wide for a phone scrolls inside its card and the
+     page stays the width of the screen — and on iOS that only half worked:
+     WebKit clipped it on screen but still counted its full width in the
+     DOCUMENT's scrollable area, so the page itself became horizontally
+     scrollable into a band of nothing. Measured at a 402px viewport:
+     scrollWidth 906 against a 402px body. Nothing weaker fixes it; Chrome and
+     Firefox were always right, so it is only ever visible on a phone. */
+  .table-scroll { overflow-x: auto; position: relative; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: var(--sp-4) var(--sp-3);
+           border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+  thead th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-label);
+             color: var(--text-muted); font-weight: var(--fw-semibold);
+             border-bottom-color: var(--border-strong); }
+  /* A clickable row needs a REAL control in it: a <tr> cannot take focus, and
+     giving it a button role would break the grid semantics that make the numeric
+     columns readable. So the first cell is a <th scope="row"> holding a button,
+     and tbody th is styled back to body text. */
+  tbody th { font-weight: var(--fw-normal); }
+  /* A HEADING AND ITS COLUMN HAVE TO AGREE. A heading sitting over the left edge
+     of a column of right-aligned figures reads as belonging to the column
+     before it — reported in Flow Metrics, where th.num was right-aligned and
+     td.num never had been. */
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: var(--surface-alt); }
+
+  .pill { display: inline-block; font-size: var(--fs-xs); padding: 1px var(--sp-4);
+          border-radius: var(--radius-pill); border: 1.5px solid var(--border-strong);
+          background: var(--surface-alt); color: var(--text-secondary); white-space: nowrap; }
+  /* A status surface is a tint fill PLUS a full-strength edge — pack rule 2. The
+     -bg tints are nearly identical to each other once red-green deficiency
+     flattens them (ΔE 8.2 at the closest), so the BORDER is what tells the
+     states apart. Never a fill alone, and never colour as the only cue: the word
+     inside the pill is doing the real work. */
+  .pill.ok   { border-color: var(--ok);   color: var(--ok);   background: var(--ok-bg); }
+  .pill.warn { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); }
+  .pill.err  { border-color: var(--err);  color: var(--err);  background: var(--err-bg); }
+
+  /* Live regions stay IN the tree and are emptied rather than hidden — an
+     element toggled out of the tree announces nothing on the way back. */
+  .warn-line { color: var(--warn); font-size: var(--fs-xs); margin-top: var(--sp-4); }
+  .warn-line:empty { display: none; }
+
+  /* ── Empty states, including the welcome card ───────────────────────────────
+     Sprint Predictability's, and the thing to keep is that there is ONE MEASURE
+     AND ONE COLOUR. Every paragraph sits in the same 80ch column and reads at
+     --text-secondary; only the heading is --text-primary. That is what makes the
+     block read as one piece of writing.
+
+     This file had THREE measures (46ch, 52ch, 54ch) and two colours, because the
+     first-run card borrowed Golf Handicap's deeper `.first-run` treatment while
+     the rest came from here — so the lede, the privacy line and the three button
+     notes each wrapped at a different width and the card looked assembled from
+     parts. If a paragraph needs its own width, that is a sign it does not belong
+     in this block.
+
+     `.empty` is the same class the table and the chart use when they have nothing
+     to show, and that is deliberate too: one empty state, one treatment. */
+  .empty { text-align: center; padding: 40px 20px; color: var(--text-secondary);
+           max-width: 80ch; margin-left: auto; margin-right: auto; }
+  .empty h2 { font-size: var(--fs-xl); margin: 0; color: var(--text-primary); }
+  /* The buttons sit in a paragraph like everything else, so the rhythm above and
+     below them is the same as between any two lines. */
+  .empty .actions { margin-top: 16px; }
+
+  /* ── Fields ─────────────────────────────────────────────────────────────────
+     The TYPE LIST is the theme pack's own, and it has to be: it is the same list
+     the pack's coarse-pointer rule enumerates, so it answers the same question
+     ("is this a thing you type into?") in the same place. ADDING A TYPE TO ONE
+     MEANS ADDING IT TO THE OTHER. It is a whitelist because it must be — a
+     checkbox handed a surface, a border and a 32px box stops being a checkbox —
+     and a whitelist grown by hand is how a field arrives silently unstyled: the
+     rounds filter's type=search shipped in Golf wearing the browser's own grey
+     box beside three fields wearing the theme's, and nothing failed.
+     A FIELD IS A CONTROL, so its edge is --input-border, not --border. */
+  select, textarea,
+  input[type="text"], input[type="number"], input[type="date"], input[type="month"],
+  input[type="search"], input[type="tel"], input[type="url"], input[type="email"],
+  input[type="password"] {
+    font: inherit; width: 100%; background: var(--surface); color: var(--text-primary);
+    border: 1px solid var(--input-border); border-radius: var(--radius-sm);
+    padding: var(--sp-3) var(--sp-4);
+    /* MIN-HEIGHT, and the second half of it is not cosmetic. An
+       `<input type="date">` with NO VALUE renders no inner content in iOS
+       Safari, and the pack turns the native appearance off on date-ish types
+       (its rule 12) — so the content box has nothing to give it a height and
+       collapses to its padding: a thin empty bar beside a full-height field
+       next to it.
+
+       `max()` of the two floors, because they answer different questions and
+       both are wanted. `--control-h` is the family's control height and is what
+       a field shares with the button beside it; `calc(1.5em + 14px)` is the box
+       a FILLED field makes — 1.5em of line-height plus the --sp-3 padding twice
+       plus the two borders — and is the one that survives, because it is in `em`
+       and the other is not. The pack lifts every field to 16px on a coarse
+       pointer so iOS does not zoom the page, and a reader who raises their
+       browser font size moves the em figure too; a hard pixel floor goes wrong
+       in both directions. On the shared rule rather than on `input[type=date]`,
+       so a new field type inherits the guard.
+
+       NEITHER Chromium NOR desktop WebKit reproduces the collapse — Chromium
+       always paints "mm/dd/yyyy" and Playwright's WebKit draws its own box. It
+       is visible on a real iPhone and in the iOS Simulator, and nowhere else.
+       Found in PAPTrack 2026-08-22; the family was swept and fixed 2026-08-23,
+       and a new app inherits the guard from here. */
+    min-height: max(var(--control-h), calc(1.5em + 14px));
+  }
+  /* Chromium draws a native inset shape for search that ignores the border and
+     the radius; appearance:none is what hands them back. It removes the native ×
+     too, which is a fair trade only because a Clear control sits beside it. */
+  input[type="search"] { appearance: none; }
+  .field { margin-bottom: var(--sp-5); }
+  .field > label { display: block; font-size: var(--fs-xs); color: var(--text-secondary);
+                   font-weight: var(--fw-semibold); margin-bottom: 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+  @media (max-width: 560px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .wrap, .headbar { padding-left: var(--sp-5); padding-right: var(--sp-5); }
+    /* A header that STAYS on screen eats a real share of a phone on the one
+       view you scroll most. It is one flick back up, which is a better trade
+       than losing that much of what you came to read. Sticky everywhere wider.
+       (It wrapped to three lines here until 2026-09-14; it is the name above
+       one scrolling line of controls now, and still not worth pinning.) */
+    header { position: static; }
+    /* Nothing is pinned here, so nothing to clear: the header's height would
+       only push every focus that much further down the screen. */
+    html { scroll-padding-top: 0; }
+  }
+
+  fieldset.formpanel { border: 1px solid var(--border); border-radius: var(--radius-sm);
+                       padding: var(--sp-5); margin: 0; background: var(--surface-alt); min-width: 0; }
+  .formpanel + .formpanel { margin-top: var(--sp-5); }
+  legend { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-label);
+           color: var(--text-secondary); font-weight: var(--fw-bold); padding: 0 var(--sp-3); }
+  .checkline { display: flex; align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+  .checkline input { width: auto; min-height: 0; margin-top: 3px; }
+
+  /* ── Dialogs ────────────────────────────────────────────────────────────────
+     --border-strong for the edge, not --border: a dialog floats above the page
+     rather than sitting in it. max-height + overflow is what stops a tall dialog
+     on a short laptop screen opening already scrolled past its own heading, and
+     overscroll-behavior stops a flick inside it scrolling the page behind. */
+  dialog { background: var(--surface); color: var(--text-primary);
+           border: 1px solid var(--border-strong); border-radius: var(--radius);
+           padding: var(--sp-7); max-width: 560px; width: calc(100% - var(--sp-8));
+           max-height: calc(100vh - var(--sp-8)); overflow: auto; overscroll-behavior: contain; }
+  /* A tall window on an installed iPhone reached up under the status bar, its
+     heading behind the clock (Wine Cellar, 2026-10-23). A dialog is centred, so
+     the room comes off BOTH ends by the larger inset — that is what keeps its top
+     edge clear of the notch. Zero wherever there is no notch. vh, not dvh:
+     dvh resolves to 0 in some embedded engines. */
+  dialog { max-height: calc(100vh - var(--sp-8)
+             - 2 * max(env(safe-area-inset-top), env(safe-area-inset-bottom))); }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+  dialog:focus { outline: none; }
+  /* A dialog heading is --fs-md — the same step as a card heading, by the role
+     contract — and an h2, as in every sibling. */
+  dialog h2 { margin: 0 0 var(--sp-5); font-size: var(--fs-md); font-weight: var(--fw-semibold); }
+  dialog p { font-size: var(--fs-xs); color: var(--text-secondary); }
+  .row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-4);
+                 justify-content: flex-end; margin-top: var(--sp-6); }
+  .row-actions .spacer { flex: 1 1 auto; }
+  /* "Start again" is folded into the Back up dialog in every app in this family,
+     and the header button stays "Back Up". Offering a destructive action without
+     the thing that makes it safe — a backup you can take at the moment of
+     hesitation — is how someone loses their data, and a confirm() cannot hold a
+     button. Behind a disclosure so it is a deliberate reach, and its summary is
+     SECONDARY ink: Golf shipped without this block once and "Start Again" fell
+     through to `details > summary`, rendering in --accent — the one app whose
+     delete-everything toggle was painted the same colour as a link. */
+  details > summary { cursor: pointer; color: var(--accent); font-size: var(--fs-xs); }
+  details.danger-zone { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+  details.danger-zone > summary { cursor: pointer; font-size: var(--fs-xs);
+                                  font-weight: var(--fw-semibold); color: var(--text-secondary); }
+  details.danger-zone > summary:hover { color: var(--text-primary); }
+  /* ── The delete-all confirmation ───────────────────────────────────────────
+     The ONE window that is identical in every app in the family, so it is
+     PAPTrack's verbatim: 18px padding on the shared 560px, and a footer that
+     pushes the safety net to the far left, keeps the two answers together on
+     the right and, on a phone, gives the backup button a row of its own rather
+     than wrapping its own label in half beside them. A new app inherits it from
+     here — that is the point of the starter. */
+  /* ── Back Up & Restore: the family's window ────────────────────────────────
+     One window across six apps (2026-08-23) — PAPTrack's, to the pixel. What
+     varies between the apps is the CONTENT (what a backup holds, which extra
+     buttons the app offers), never the frame around it. A new app inherits the
+     block from here; keep it in step with PAPTrack, Sprint Predictability, Flow
+     Metrics, Golf Handicap and Money Map. */
+  #dataDialog { max-width: 700px; padding: 18px; }
+  #dataDialog p { font-size: var(--fs-xs); color: var(--text-secondary); margin: 0 0 12px; }
+  #dataDialog hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+  #dataDialog .datarow { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
+  #dataDialog details.danger-zone > p { margin: 10px 0 12px; }
+  #dataDialog .datafoot { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-top: 14px; }
+  #clearDialog { padding: 18px; }
+  .clearfoot { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-top: 14px; }
+  .clearfoot .safety { margin-right: auto; }
+  @media (max-width: 460px) {
+    .clearfoot .safety { flex: 1 0 100%; margin-right: 0; }
+  }
+
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  /* Export buttons sit in a card's heading row, so they are chrome rather than
+     the action the page is asking for. */
+  .btn-small { min-height: var(--chrome-h); padding: 4px 9px; font-size: var(--fs-xs); }
+  /* ── The header row on TOUCH ───────────────────────────────────────────────
+     theme.css puts every <select> at 16px on a coarse pointer (pack rule 10, the
+     iOS focus-zoom floor) and rightly leaves <button> alone — a button raises no
+     keyboard, so it has no zoom to avoid. What that left, in every app in the
+     family at once, is a header row whose PICKERS carry a label a size bigger
+     than the buttons beside them, and stand a pixel taller with it. The rule is
+     right; the apps never answered it.
+
+     So on touch the row's buttons take the same 16px, and the height everything
+     in the row is pinned to grows 30px → 34px, which is exactly what 16px text
+     measures in the 4px/9px box the row already uses (24px line + 8px padding +
+     2px border). Mouse sizes are untouched, which is where the chrome height
+     actually reads — pack rule 10 says so in as many words.
+
+     `.btn-small` is chrome too (a card's export buttons) and takes the same
+     step; `.icon-btn` grows with the token, and deliberately: its square is
+     --chrome-h because a row action is the same class of thing, and a 34px
+     target on touch is the right side of that trade. A new app inherits all of
+     it from here. Fixed in all six apps on 2026-08-23. */
+  @media (pointer: coarse) {
+    :root { --chrome-h: 34px; }
+    .headbar button, .btn-small { font-size: var(--fs-base); }
+  }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+             overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* ── The info dot ──────────────────────────────────────────────────────────
+     A circled "i" beside a label, opening the help window below rather than a
+     hover tooltip so it works the same on a phone. THE SAME BLOCK IS IN EVERY
+     APP THAT HAS ONE, PROPERTY BY PROPERTY (2026-08-23) — copy it, do not
+     re-derive it, and a change to any of it belongs in all of them.
+
+     THE GLYPH IS `i`, NOT `?`. "?" is the glyph a browser already puts on its
+     own help cursor and in a form's validation bubble, and it asks a question
+     where this thing answers one — it promises an answer to something the
+     reader asked, where `i` offers a note they can ignore. Golf Handicap and
+     the NY calculator drew a filled 18px "?" until the family sweep; this file
+     did too, before that.
+
+     An icon must NEVER sit flush against the word it follows — a standing
+     preference across every app in this family, and the 7px margin is it.
+     `min-height: 0` opts out of any button floor an app puts under its
+     controls; ::after inflates the tap target to WCAG 2.2's 24px without
+     painting anything and without changing the line's height, which is why a
+     dot never makes a row taller. The hover FILLS rather than borrowing
+     `--focus-border`: a hover in the focus colour says "focused" to anybody
+     reading the two states side by side. */
+  .tile-help { display: inline-flex; align-items: center; justify-content: center;
+    position: relative; box-sizing: border-box; flex: none;
+    width: 16px; height: 16px; min-height: 0; padding: 0; margin-left: 7px;
+    border: 1px solid var(--border-control); border-radius: 50%;
+    background: transparent; color: var(--text-secondary);
+    font-family: inherit; font-size: var(--fs-xs); font-weight: 700;
+    line-height: 1; text-transform: none; cursor: pointer; vertical-align: 1px; }
+  .tile-help:hover { background: var(--surface-alt); border-color: var(--text-secondary);
+    color: var(--text-primary); }
+  /* -5px, NOT -4: `inset` resolves against the PADDING box, and the circle is a
+     16px BORDER box with a 1px border — so the padding box is 14px and -4px grew
+     the target to 22px, two short of the 24px WCAG 2.2 SC 2.5.8 asks for. -5px
+     lands it on exactly 24. Measured, not reasoned: axe reports the circle's own
+     16px and cannot see a pseudo-element, so only a hit-test at the edge says. */
+  .tile-help::after { content: ''; position: absolute; inset: -5px; }
+
+  /* ── The help window ───────────────────────────────────────────────────────
+     THE SAME RULES ARE IN EVERY APP THAT HAS ONE (2026-08-23). They are about
+     the TEXT sizing the window rather than the window holding the text: this is
+     the one dialog that is nothing but prose, so `#helpBody` is capped at a
+     66-character reading measure and `fit-content` makes the window take that
+     cap as its width. Both or neither — the cap alone leaves the paragraph
+     hugging the left of a window sized for a table with the rest of it empty,
+     and `fit-content` alone lets the lines run the full width at about 150
+     characters, roughly twice what anybody reads comfortably.
+
+     EVERYTHING ELSE HERE IS DECLARED RATHER THAN INHERITED, and that is the
+     lesson rather than the detail. When the family first shared this window,
+     only the measure was pinned and the rest was left to each app's `dialog h2`
+     and `dialog p` — and five things drifted straight back apart: an unset
+     heading weight defaults to bold (700), an unset paragraph colour lands on
+     `--text-primary`, browser paragraph spacing is 1em rather than 10px, bold
+     inside a `--text-secondary` paragraph has nothing lifting it, and each
+     app's own dialog padding was the only thing left deciding the width. All
+     seven windows are 666px with 624px of text because all of it is written
+     down here. `padding: 20px` overrides this file's own `--sp-7`. */
+  #helpDialog { width: fit-content; max-width: calc(100% - 32px); padding: 20px; }
+  #helpTitle { margin: 0 0 12px; font-size: var(--fs-md); font-weight: 600;
+    color: var(--text-primary); }
+  #helpBody { max-width: 66ch; font-size: var(--fs-sm); line-height: 1.55;
+    color: var(--text-secondary); }
+  #helpBody p, #helpBody li { font-size: inherit; line-height: inherit;
+    color: inherit; margin: 0 0 10px; }
+  #helpBody p:last-child, #helpBody li:last-child { margin-bottom: 0; }
+  #helpBody strong { color: var(--text-primary); }
+
+  /* ── The toast is a POPOVER, and that is the only way it can be seen while a
+     dialog is open. A modal <dialog> sits in the browser's TOP LAYER, which
+     paints above every z-index in the ordinary document — so a toast fired from
+     an open dialog is drawn under it and its backdrop: invisible, and
+     indistinguishable from a button that does nothing. A bigger z-index cannot
+     reach the top layer. The share dialog's Copy Link is the case that has to
+     work, since copying leaves the dialog open.
+
+     `right: auto; top: auto` ARE LOAD-BEARING. The UA stylesheet gives a popover
+     `inset: 0` and `margin: auto`, which beat a bare `left`/`bottom` and park the
+     toast in the top-left corner of the screen. Anything else that must appear
+     over a dialog needs the same treatment. */
+  #toast { position: fixed; left: 50%; right: auto; top: auto; bottom: var(--sp-7);
+           margin: 0; transform: translateX(-50%);
+           background: var(--surface-alt); border: 1px solid var(--border-strong);
+           color: var(--text-primary); padding: var(--sp-4) var(--sp-6);
+           border-radius: var(--radius-pill); font-size: var(--fs-sm); overflow: visible;
+           opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50;
+           max-width: 90vw; text-align: center; }
+  #toast.show { opacity: 1; }
+
+  /* ── The footer every public page in this account carries ───────────────────
+     The COLOUR and SIZE live on <footer>, and the paragraphs keep their own
+     default margins. Putting `margin: 34px 0 0` on each paragraph instead — as
+     an earlier draft of this file did — puts 34px above all three and the block
+     falls apart. */
+
+  @media print {
+    /* The pack does the palette, the margins, the repeated table headings, the
+       page-break manners AND the family chrome — .headbar's buttons and the two
+       pickers by name (rule 13). What is left is an app's OWN furniture, tagged
+       .no-print rather than left for the pack to guess at class names it cannot
+       see. Both panels print: on paper there are no tabs to press. */
+    .no-print { display: none !important; }
+    /* Paper cannot scroll: what is left of the header row wraps instead. */
+    .headctl { overflow: visible !important; flex-wrap: wrap !important; }
+  }
+/* ── The footer every public page in this account carries ────────────────────
+   Sprint Predictability's, transcribed — it is the design lead for this chrome,
+   and a change here belongs there too. THREE lines, always: what the app does
+   with your data, the privacy policy beside the repo under the label "How it
+   works", and the authorship line.
+
+   The authorship line carries TWO links and the pairing is the part that gets
+   got wrong: "independent personal project" points at NOTICE (who owns it) and
+   "MIT licensed" points at LICENSE (the terms). They were the other way round
+   in Sprint Predictability once — the label promised the licence and landed on
+   the provenance statement, whose own second line then says "See LICENSE for
+   the terms".
+
+   `footer` is a flex ROW so an app with a cross-link to a sibling can put it at
+   the right-hand end; `.footnotes` is what keeps the three paragraphs stacked
+   inside it. Without that wrapper the paragraphs become flex items and lay out
+   side by side, so it is not optional even on a page with no cross-link.
+
+   The links are MUTED rather than accent: this is provenance at the foot of a
+   document, not something to click on the way in. */
+footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.footnotes { flex: 1 1 320px; min-width: 0; }
+.privacy { font-size: var(--fs-xs); color: var(--text-muted); margin: 28px 0 0; padding: 0 19px; }
+.privacy-links { margin-top: 6px; }
+.privacy-links a { color: var(--text-muted); }
+
+/* ── Held back until the first render — see the head script for why ──────────
+   The header is NOT covered: it is static markup and already correct at first
+   paint, so holding it back would only make the page slower to show anything at
+   all. Everything render() decides the content or the presence of lives inside
+   <main> (the tab strip included) or in the footer, and that is the whole list.
+
+   visibility, NEVER display: none. render() runs while this is on, and a chart
+   sizes itself off its container — a zero-width container is a zero-width chart
+   that never corrects itself, because nothing re-measures once it has built.
+   The boxes stay; only the painting is held. */
+html[data-booting] main,
+html[data-booting] footer { visibility: hidden; }
+
+/* Every tick box (and radio) is one fixed size that a flex row can never
+   squeeze — the family rule since 2026-10-27, when iPhone Safari drew a Wine
+   Cellar setting's box about 5pt across beside its long label. The native
+   12–13px is a small target on a phone anyway. Last in the sheet so it wins at
+   equal weight; size only, never a colour. */
+input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height: 1.25rem; min-width: 0; min-height: 0; }
+
+  /* ═══════════════════════════ Break Room's own ═══════════════════════════
+     Everything above is the family's shell. What follows is what a room needs
+     and nothing in the family had: a code big enough to read out over a call,
+     a roster with online dots, and the answer grid a round of trivia is
+     played on. Not one literal colour and not one raw pixel size — a dot is
+     --ok, an avatar is a --series-* tint on its full-strength edge (pack rule
+     3), and the big code is --fs-xl in the family's mono face. */
+
+  /* The room code: the one thing read aloud over a Teams call, so it is the
+     largest text on the page, spaced out letter by letter and in the mono face
+     so an 8 cannot be mistaken for a B. Selected whole on a click, so a copy
+     is one gesture. */
+  .code { font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: var(--fw-bold);
+          letter-spacing: 0.18em; user-select: all; -webkit-user-select: all; }
+  .code-row { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
+  .code-row .hint { margin: 0; }
+
+  /* ── The roster ────────────────────────────────────────────────────────────
+     A list, not a table: there is one column of names, and a table for one
+     column is furniture. Each row is a dot, an initial, a name and any badges.
+     THE DOT IS --ok OR --text-muted, NEVER RED FOR AWAY — Charles is red-green
+     colourblind, and "away" is an absence, not a warning. The word beside it
+     (visually hidden) carries the state for a screen reader, so colour is
+     never the only cue. */
+  .roster { list-style: none; margin: 0; padding: 0; }
+  .roster li { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0;
+               border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+  .roster li:last-child { border-bottom: 0; }
+  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%;
+         background: var(--text-muted); border: 1px solid var(--border-strong); }
+  .dot.on { background: var(--ok); border-color: var(--ok); }
+  /* The avatar is a two-letter disc on the pack's categorical ramp. `--hue`
+     is 1..5, set per player from their stored hue (0..11, reduced modulo 5).
+     Tint fill + full-strength edge is pack rule 3; the letters read in
+     --text-primary over the tint, which is why the fill is only 35%. */
+  .avatar { flex: none; width: 28px; height: 28px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+            border: 2px solid var(--series-1); color: var(--text-primary);
+            background: color-mix(in srgb, var(--series-1) 35%, var(--surface)); }
+  .avatar.h2 { border-color: var(--series-2); background: color-mix(in srgb, var(--series-2) 35%, var(--surface)); }
+  .avatar.h3 { border-color: var(--series-3); background: color-mix(in srgb, var(--series-3) 35%, var(--surface)); }
+  .avatar.h4 { border-color: var(--series-4); background: color-mix(in srgb, var(--series-4) 35%, var(--surface)); }
+  .avatar.h5 { border-color: var(--series-5); background: color-mix(in srgb, var(--series-5) 35%, var(--surface)); }
+  .roster .who { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .roster .you { color: var(--text-secondary); }
+
+  /* ── The home card's form ──────────────────────────────────────────────────
+     Two rows of a field and its button, in the `.empty` column the welcome
+     card uses. The button sits on the field's baseline rather than under it,
+     and both drop to full width on a phone. */
+  .joinrow { display: flex; gap: var(--sp-4); align-items: flex-end; justify-content: center;
+             flex-wrap: wrap; margin: var(--sp-5) 0; }
+  .joinrow .field { margin: 0; flex: 0 1 18rem; text-align: left; }
+  .joinrow button { flex: 0 0 auto; }
+  @media (max-width: 460px) { .joinrow .field, .joinrow button { flex: 1 0 100%; } }
+  /* A code box is typed in capitals and in the mono face, so what the reader
+     sees is what the roster will show. */
+  #joinCode, #inviteLink { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  #inviteLink { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); color: var(--text-secondary); }
+  .recent { display: flex; gap: var(--sp-4); flex-wrap: wrap; justify-content: center; }
+  .recent button { font-family: var(--font-mono); letter-spacing: 0.08em; }
+
+  /* ── The lobby and a game, side by side ────────────────────────────────────
+     The roster is the thing to glance at; the game card is the thing to look
+     at. Two columns at a desk, one on a phone, and the roster goes UNDER the
+     game on a phone because the question is what a player came for. */
+  .room { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--sp-6);
+          align-items: start; }
+  @media (max-width: 760px) { .room { grid-template-columns: minmax(0, 1fr); }
+                              .room > .side { order: 2; } }
+  .room .card { margin-bottom: var(--sp-6); }
+
+  /* The countdown: tabular figures so the digits do not jitter as they fall,
+     and --warn for the last five seconds — a status surface wants its word as
+     well as its colour, and the number IS the word here. */
+  .countdown { font-variant-numeric: tabular-nums; font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+  .countdown.low { color: var(--warn); }
+  .meter { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5);
+           flex-wrap: wrap; margin-bottom: var(--sp-5); }
+
+  /* ── The answer grid ───────────────────────────────────────────────────────
+     Four big buttons, two by two, each tall enough to press from a sofa. The
+     one you chose carries the primary fill until the reveal; at the reveal the
+     correct answer takes the --ok edge and the wrong one you picked the --err
+     edge, EACH WITH A WORD IN IT ("correct", "yours") — the colours are never
+     the only cue. The count under each answer is the whole room's spread. */
+  .qtext { font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-6);
+           overflow-wrap: anywhere; }
+  .answers { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+  @media (max-width: 560px) { .answers { grid-template-columns: 1fr; } }
+  .answers button { min-height: 64px; white-space: normal; text-align: left; padding: 12px 14px;
+                    display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+                    justify-content: center; font-size: var(--fs-base); overflow-wrap: anywhere; }
+  .answers button .tag { font-size: var(--fs-xs); color: var(--text-secondary); }
+  .answers button.mine { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
+  .answers button.mine .tag { color: var(--btn-text); }
+  .answers button.right { border-color: var(--ok); background: var(--ok-bg); color: var(--text-primary); border-width: 2px; }
+  .answers button.wrong { border-color: var(--err); background: var(--err-bg); color: var(--text-primary); border-width: 2px; }
+  .answers button.right .tag { color: var(--ok); }
+  .answers button.wrong .tag { color: var(--err); }
+  /* Disabled answers stay readable at the reveal: the pack dims a disabled
+     button to .45, which is right for a control and wrong for a result the
+     reader is meant to study. Re-asserted here for the reveal only. */
+  .answers.revealed button:disabled { opacity: 1; cursor: default; }
+
+  /* The scoreboard is a table because it has three columns that line up. The
+     leader's row is bold rather than coloured. */
+  .scores th.num, .scores td.num { width: 6ch; }
+  .scores tr.lead th, .scores tr.lead td { font-weight: var(--fw-semibold); }
+  .gain { color: var(--ok); font-variant-numeric: tabular-nums; }
+
+  /* A textarea for a pasted pack, in the mono face so the pipes line up. */
+  #packText { font-family: var(--font-mono); font-size: var(--fs-xs); min-height: 12em; resize: vertical; }
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to the main content</a>
+
+<header>
+  <!-- ── The family's header order ──────────────────────────────────────────
+       Every app lays this row out the same way, so a control is in the same
+       place whichever one you have open. Right to left, because the row is
+       right-aligned and the right-hand end is the fixed one:
+
+         theme · Share · Back up · ⚙ settings · ☰ manage · the record picker ·
+         zoom · find · everything else
+
+       An app skips what it hasn't got and the rest close up. THE THEME PICKER
+       IS ALWAYS LAST. Here "Share" is INVITE — the same slot, the same ↗ glyph,
+       because to a reader it is the same verb — and it is hidden until there is
+       a room to invite anyone to.
+
+       Every button wears a glyph in front of its word: plain text characters,
+       NOT emoji and not an icon font. Each is aria-hidden — the word beside it
+       is already the whole label.
+
+       EVERYTHING IS WRITTEN AT ITS FINAL SIZE. The header paints long before the
+       script at the foot of the page runs, so a control filled in by JS grows on
+       screen and shoves the page down. -->
+  <div class="headbar">
+    <h1 class="brand"><img class="mark" src="favicon.ico?v=2" width="22" height="22" alt="">Break Room</h1>
+    <!-- `.headrow` holds the scroller and its two arrows; the arrows cannot go
+         inside the thing they scroll. The controls sit in `.headctl`, one line
+         that scrolls sideways when it does not fit (2026-09-14). -->
+    <div class="headrow">
+    <div class="headctl">
+    <button class="no-print" id="dataBtn" title="Back up or restore your custom question packs, or forget this browser"><span aria-hidden="true">⇩</span> Back Up</button>
+    <button class="no-print" id="inviteBtn" hidden title="Invite someone to this room"><span aria-hidden="true">↗</span> Invite</button>
+    <label class="sr-only" for="themeSel">Theme</label>
+    <!-- Alphabetical: Auto, Dark, Light, Midnight, Sepia. Auto is first because
+         of the alphabet, not because it is the default. It carries `selected`
+         so the picker never reads one theme while the boot script has already
+         painted another. That is the THIRD place the default lives. -->
+    <select class="no-print" id="themeSel" title="Change the colour theme">
+      <option value="auto" selected>◐ Auto</option>
+      <option value="dark">☾ Dark</option>
+      <option value="light">☀ Light</option>
+      <option value="midnight">✦ Midnight</option>
+      <option value="sepia">📜 Sepia</option>
+    </select>
+    </div>
+    <!-- Out of the Tab order and hidden from a screen reader on purpose: every
+         control in the row is reachable with Tab, and focusing one scrolls it
+         into view. The arrows are for a pointer. Ships `hidden`;
+         wireScrollRow() shows it only while the row has something off an end. -->
+    <div class="rownav" hidden><button type="button" tabindex="-1" aria-hidden="true"
+      title="Scroll the controls left">‹</button><button type="button" tabindex="-1"
+      aria-hidden="true" title="Scroll the controls right">›</button></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<!-- A real <main>, with the skip link's target on it, and </main> closes BEFORE
+     the <footer> — a <footer> nested inside main is not contentinfo at all. -->
+<main id="main" tabindex="-1">
+
+  <!-- ── The home card ────────────────────────────────────────────────────────
+       The family's welcome card, and here it is not a first-run screen but the
+       front door every visit opens on: a nickname and two ways in. It is pure
+       display — nothing is stored until a room is started or joined. -->
+  <div class="card welcome" id="homeCard" hidden>
+    <div class="empty">
+      <h2>Break Room</h2>
+      <p>A room your team drops into beside the call you already have open: see who's
+        around, then play a round of trivia together. No account and nothing to install —
+        pick a nickname, then start a room or join one with its six-letter code.</p>
+      <!-- The privacy claim the footer three inches below already makes, and the
+           two must never disagree. -->
+      <p>Your nickname stays in this browser. A room, and everything said in it, is gone
+        within a day of the night it was opened.</p>
+      <div class="joinrow">
+        <div class="field">
+          <label for="nickBox">Nickname</label>
+          <input type="text" id="nickBox" maxlength="20" autocomplete="nickname" placeholder="What the room calls you">
+        </div>
+        <button type="button" class="primary" id="createBtn">Start a Room</button>
+      </div>
+      <div class="joinrow">
+        <div class="field">
+          <label for="joinCode">Room code
+            <button class="tile-help" type="button" data-help="code" aria-label="How a room code works">i</button></label>
+          <input type="text" id="joinCode" maxlength="8" autocomplete="off" autocapitalize="characters"
+                 spellcheck="false" placeholder="6 letters">
+        </div>
+        <button type="button" id="joinBtn">Join</button>
+      </div>
+      <p class="warn-line" id="homeWarn" role="status"></p>
+      <div class="recent" id="recentWrap"></div>
+      <!-- Said once, here, when this copy of the page has no cloud behind it:
+           every door above is then a door onto nothing, and a button that does
+           nothing is worse than no button. -->
+      <p id="noCloud" hidden><strong>This copy of Break Room isn't connected to its cloud yet</strong>,
+        so a room can't be started or joined from here. The steps are in the README.</p>
+      <!-- M1-DEMO-SLOT -->
+    </div>
+  </div>
+
+  <!-- A room: the lobby, a game or the results. Built entirely by render(),
+       because what is in it is another browser's data and arrives by the
+       listener. -->
+  <div id="roomView" hidden></div>
+</main>
+
+<!-- ── The footer every public page in this account carries ──────────────────
+     Three things, always: the privacy policy, the repo under the label "How it
+     works" (never "README" or "Source on GitHub"), and the authorship line. -->
+<footer>
+  <div class="footnotes">
+    <!-- Keeps its id because the cloud module rewrites this note's textContent
+         to say whether a room is live. -->
+    <p class="privacy" id="privacyNote">🔒 Your nickname stays in this browser. A room lives in the cloud
+      for the evening — anyone holding its code can see it — and is deleted within a day.</p>
+    <p class="privacy privacy-links"><a href="privacy.html">Privacy policy</a> &middot;
+      <a href="https://github.com/eagleadams86/break-room" target="_blank" rel="noopener noreferrer">How it works</a></p>
+    <!-- Its own element, deliberately NOT part of #privacyNote: that note's
+         textContent is rewritten, which would silently delete a link nested
+         inside it. TWO links: "independent personal project" points at NOTICE
+         (who owns it) and "MIT licensed" at LICENSE (the terms). -->
+    <p class="privacy privacy-links">&copy; 2026 Charles Adams — an
+      <a href="https://github.com/eagleadams86/break-room/blob/main/NOTICE"
+         target="_blank" rel="noopener noreferrer">independent personal project</a>,
+      <a href="https://github.com/eagleadams86/break-room/blob/main/LICENSE"
+         target="_blank" rel="noopener noreferrer">MIT licensed</a>.</p>
+  </div>
+</footer>
+</div>
+
+<div id="toast" popover="manual" role="status" aria-live="polite"></div>
+
+<!-- ── Dialogs ─────────────────────────────────────────────────────────────── -->
+
+<dialog id="dataDialog" aria-labelledby="dataTitle">
+  <h2 id="dataTitle">Back Up &amp; Restore</h2>
+  <p>One JSON file holding your nickname and any custom question packs you have written — a
+    copy you keep, independent of this browser. Rooms are never in it: a room lives in the
+    cloud for an evening and is not yours to keep.</p>
+  <div class="datarow">
+    <button type="button" id="exportBtn"><span aria-hidden="true">⬇︎</span> Download Backup (JSON)</button>
+    <button type="button" id="importBtn"><span aria-hidden="true">⬆︎</span> Restore from Backup…</button>
+    <input type="file" id="importFile" accept="application/json,.json" class="sr-only" aria-hidden="true" tabindex="-1">
+  </div>
+  <hr>
+  <p>Restoring <strong>replaces the packs and nickname in this browser</strong>. You are told
+    what the file holds and asked to confirm first.</p>
+  <details class="danger-zone">
+    <summary>Forget This Browser</summary>
+    <p>Deletes your nickname, your custom packs and the list of recent rooms from this
+      browser, and leaves any room you are in. Your theme is kept.</p>
+    <div class="datarow">
+      <button type="button" id="clearBtn" class="danger">Delete All Data</button>
+    </div>
+  </details>
+  <div class="datafoot">
+    <button type="button" id="dataClose" class="primary">Close</button>
+  </div>
+</dialog>
+
+<!-- ── Confirming a delete-all ───────────────────────────────────────────────
+     Its own dialog rather than a confirm(): this is the one action with no way
+     back, so it gets room to say exactly how much is going and to offer the
+     backup that is the only route back — which a confirm() cannot hold a button
+     for. The same window, to the pixel, in every app in the family. -->
+<dialog id="clearDialog" aria-labelledby="clearTitle">
+  <h2 id="clearTitle">Delete All Data?</h2>
+  <p id="clearBody"></p>
+  <div class="clearfoot">
+    <button type="button" id="clearBackupBtn" class="safety"><span aria-hidden="true">⬇︎</span> Download Backup First</button>
+    <button type="button" id="clearCancel">Cancel</button>
+    <button type="button" id="clearConfirm" class="danger">Delete Everything</button>
+  </div>
+</dialog>
+
+<!-- M1-DIALOG-SLOT -->
+
+<!-- The help window. ONE window for the whole app, filled from the HELP table
+     by whichever info dot was pressed — that is the shape every sibling uses.
+     It is not sized here — the two rules in the stylesheet let its own text set
+     its width — and "Got It" is the family's word for dismissing it. -->
+<dialog id="helpDialog" aria-labelledby="helpTitle">
+  <h2 id="helpTitle">About</h2>
+  <div id="helpBody"></div>
+  <div class="row-actions">
+    <button type="button" class="primary" id="helpCloseBtn">Got It</button>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE GUARDS. Everything above is how the app looks; this is what stops it
+   losing or mangling somebody's data — and, in this app, what stops another
+   browser's data from reaching this one unchecked. EVERY FIRESTORE SNAPSHOT
+   WAS WRITTEN BY SOMEBODY ELSE'S BROWSER and is treated as a hostile backup:
+   it comes through an allowlist that rebuilds rather than merges, with every
+   uid pinned to a shape, every string sliced to its cap, every number
+   finite-or-zero, every list capped. None of it is optional.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── What this browser keeps ──────────────────────────────────────────────
+   ONE localStorage key, and nothing a room holds is ever in it. `nick` is
+   what the room calls you, `code` is the room to rejoin silently on reload,
+   `packs` are custom trivia packs the host wrote, `recent` is the last few
+   codes for the home card's buttons. The theme has its own key because the
+   head script reads it before this file runs. Two apps sharing a key on one
+   origin overwrite each other, which is why every key is prefixed. */
+const LOCAL_KEY = 'break-room-local';
+const THEME_KEY = 'break-room-theme';
+
+/* ── The data format number ────────────────────────────────────────────────
+   It rides into localStorage and every backup file as `version`, and onto
+   every room document as `schema`, and the boundaries below REFUSE a copy
+   carrying a higher one. normalizeLocal() and normalizeRoom() rebuild from
+   the keys they know and silently drop the rest — exactly right for a damaged
+   backup, catastrophic for a copy written by a NEWER build, which would have
+   its new fields quietly deleted by an old host's next transaction.
+   BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
+const SCHEMA = 1;
+
+/* ── Ids from outside are not trusted ──────────────────────────────────────
+   A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
+   reach `data-uid` attributes and are the keys of `scores`, so a uid from a
+   snapshot is attacker-controlled input on an origin shared with every other
+   app. Every uid entering through the normalizers below is dropped (not
+   repaired — a repaired uid is a player nobody is) if it isn't this shape. */
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+let idSeq = 0;
+function uid() {
+  idSeq += 1;
+  return 'i' + Date.now().toString(36) + idSeq.toString(36);
+}
+
+/* Escape EVERYTHING rendered. An XSS hole in any app on this origin is a hole
+   in all of them, including the two holding work figures — and here every
+   nickname, every question and every answer on screen was typed in some other
+   browser. */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* ── Room codes ───────────────────────────────────────────────────────────
+   League Night's alphabet: no 0/O or 1/I and no lower case, because a code
+   is read out over a call and typed on a phone. SIX characters — 32^6 is
+   about a billion, and a room lives hours, not seasons, so League Night's
+   eight would buy nothing. The code is the room's READ capability: nobody can
+   list rooms (`allow list: if false` in firestore.rules), so holding the code
+   is the only way in, and that is the whole access model until a persistent
+   house arrives. crypto.getRandomValues, never Math.random. */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_LEN = 6;
+const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
+function randomCode() {
+  const bytes = new Uint8Array(CODE_LEN);
+  crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < CODE_LEN; i++) out += CODE_ALPHABET[bytes[i] % 32];
+  return out;
+}
+/* What a reader typed, made comparable: upper case, no spaces or dashes.
+   Nothing is "corrected" — the alphabet has no 0/O or 1/I precisely so there
+   is nothing to guess at, and a code with one in it is simply not a code. */
+function cleanCode(raw) {
+  return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/* ── The caps, in one place ────────────────────────────────────────────────
+   Every one of these mirrors a line in firestore.rules, and the suite pins the
+   pairs that can be read off both files. A string over its cap is SLICED on
+   the way in, never refused: a nickname of 21 characters is a nickname, not
+   an attack. */
+const NICK_MAX = 20;
+const PLAYERS_MAX = 32;        /* scores map ≤ 32 keys in the rules */
+const FEED_MAX = 20;
+const FEED_TEXT_MAX = 40;
+const PACK_NAME_MAX = 40;
+const PACK_QS_MAX = 60;
+const Q_MAX = 160;
+const A_MAX = 60;
+const PACKS_MAX = 10;          /* custom packs kept in this browser */
+const RECENT_MAX = 5;
+const PHASES = ['lobby', 'play', 'results'];
+const KINDS = ['trivia', 'draw', 'ice', 'codenames'];
+
+/* ── Time, in one place ────────────────────────────────────────────────────
+   A room lives six hours from its creation; the host may extend it two hours
+   at a time to a twelve-hour ceiling the rules enforce (`expiresAt <=
+   request.time + 12h`). Presence is a heartbeat, because Firestore has no
+   onDisconnect: a player rewrites `seenAt` every 90 s and is "online" for
+   four minutes after their last write; a host silent for three minutes is
+   stale and the longest-present online player takes over. The numbers are
+   deliberately NOT equal — a host must be stale BEFORE the room thinks they
+   are offline, or the roster would show a host nobody can replace. */
+const ROOM_MS = 6 * 60 * 60 * 1000;
+const EXTEND_MS = 2 * 60 * 60 * 1000;
+const ROOM_MAX_MS = 12 * 60 * 60 * 1000;
+const HEARTBEAT_MS = 90 * 1000;
+const ONLINE_MS = 4 * 60 * 1000;
+const HOST_STALE_MS = 3 * 60 * 1000;
+const HOST_OVERDUE_MS = 10 * 1000;
+
+function blankLocal() {
+  return { version: SCHEMA, nick: '', code: '', packs: [], recent: [] };
+}
+
+/* A finite number or the fallback. `Number(null)` is 0 and finite, so a
+   missing field is 0 here BY DESIGN for counts and timestamps — a missing
+   `seenAt` reads as "never", which is the right answer. Anything whose zero
+   is a real value with a different meaning gets its own guard. */
+function num(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function int(v, lo, hi, fallback) {
+  const n = Math.trunc(num(v, NaN));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
+}
+/* A Firestore Timestamp, a number of milliseconds, or nothing. The module
+   converts Timestamps on the way in, so the boundary mostly sees numbers —
+   but a Timestamp shape is accepted too, because a boundary that depends on
+   the caller having converted first is a boundary with a hole in it. */
+function toMs(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (v && typeof v.toMillis === 'function') { const n = Number(v.toMillis()); return Number.isFinite(n) ? n : 0; }
+  if (v && typeof v.seconds === 'number') return v.seconds * 1000 + Math.floor(num(v.nanoseconds, 0) / 1e6);
+  return 0;
+}
+
+/* ── The allowlist for what THIS browser keeps ────────────────────────────
+   REBUILDS rather than merges, so a field not named here does not survive a
+   save. EVERY field is type-checked, not merely present-checked, because all
+   of this can arrive from a restored backup somebody else wrote. A NEW STORED
+   FIELD MUST BE ADDED HERE, and SCHEMA bumped in the same commit. */
+function normalizeLocal(raw) {
+  const out = blankLocal();
+  if (!raw || typeof raw !== 'object') return out;
+  out.nick = String(raw.nick == null ? '' : raw.nick).trim().slice(0, NICK_MAX);
+  const code = cleanCode(raw.code);
+  out.code = CODE_RE.test(code) ? code : '';
+  out.packs = (Array.isArray(raw.packs) ? raw.packs : []).map(normalizePack).filter(Boolean).slice(0, PACKS_MAX);
+  const seen = new Set();
+  out.recent = (Array.isArray(raw.recent) ? raw.recent : []).map((r) => {
+    const c = cleanCode(r && r.code);
+    if (!CODE_RE.test(c) || seen.has(c)) return null;
+    seen.add(c);
+    return { code: c, at: num(r && r.at, 0) };
+  }).filter(Boolean).slice(0, RECENT_MAX);
+  return out;
+}
+
+/* A trivia pack — the host's own, or one arriving on a room document from
+   another browser. The same allowlist either way: a name, and up to sixty
+   questions each with exactly four answers and a correct index. A question
+   with fewer than four non-empty answers is DROPPED rather than padded, since
+   a padded blank answer would be an option nobody can read. */
+function normalizePack(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = String(raw.name == null ? '' : raw.name).trim().slice(0, PACK_NAME_MAX);
+  const qs = (Array.isArray(raw.qs) ? raw.qs : []).map((q) => {
+    if (!q || typeof q !== 'object') return null;
+    const text = String(q.q == null ? '' : q.q).trim().slice(0, Q_MAX);
+    const a = (Array.isArray(q.a) ? q.a : []).slice(0, 4)
+      .map((s) => String(s == null ? '' : s).trim().slice(0, A_MAX));
+    if (!text || a.length !== 4 || a.some((s) => !s)) return null;
+    return { q: text, a: a, c: int(q.c, 0, 3, 0) };
+  }).filter(Boolean).slice(0, PACK_QS_MAX);
+  if (!name && !qs.length) return null;
+  return { name: name || 'Untitled pack', qs: qs };
+}
+
+/* ── The cloud snapshots, normalized ──────────────────────────────────────
+   `room`, `players` and `answers` are never saved locally, never in a backup,
+   never anywhere but memory. Each normalizer takes whatever the listener
+   handed over and returns the family shape or null. A uid that fails ID_RE
+   is DROPPED with its record: there is no "repaired" uid, because a player
+   nobody wrote is a player nobody is. */
+function normalizeScores(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  Object.keys(raw).filter((k) => ID_RE.test(k)).slice(0, PLAYERS_MAX)
+    .forEach((k) => { out[k] = int(raw[k], -1e9, 1e9, 0); });
+  return out;
+}
+function normalizeFeed(raw) {
+  return (Array.isArray(raw) ? raw : []).map((f) => {
+    if (!f || typeof f !== 'object') return null;
+    const t = ['guess', 'got', 'info'].indexOf(f.t) === -1 ? null : f.t;
+    const who = String(f.uid == null ? '' : f.uid);
+    if (!t || !ID_RE.test(who)) return null;
+    return { t: t, uid: who, text: String(f.text == null ? '' : f.text).slice(0, FEED_TEXT_MAX) };
+  }).filter(Boolean).slice(0, FEED_MAX);
+}
+/* The game map is each game's own: the registry entry's `normalize` rebuilds
+   it. With no game on, or an unknown kind, only the four fields every game
+   shares survive. */
+function normalizeGame(kind, raw) {
+  const g = (raw && typeof raw === 'object') ? raw : {};
+  const base = {
+    step: String(g.step == null ? '' : g.step).slice(0, 20),
+    stepAt: toMs(g.stepAt),
+    stepMs: int(g.stepMs, 0, 60 * 60 * 1000, 0),
+    round: int(g.round, 0, 1e6, 0),
+  };
+  const game = GAMES[kind];
+  return game && game.normalize ? game.normalize(g, base) : base;
+}
+function normalizeRoom(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const host = String(raw.host == null ? '' : raw.host);
+  if (!ID_RE.test(host)) return null;
+  const phase = PHASES.indexOf(raw.phase) === -1 ? 'lobby' : raw.phase;
+  const kind = KINDS.indexOf(raw.kind) === -1 ? null : raw.kind;
+  return {
+    host: host,
+    rev: int(raw.rev, 0, 1e9, 0),
+    schema: int(raw.schema, 0, 1e6, 1),
+    createdAt: toMs(raw.createdAt),
+    expiresAt: toMs(raw.expiresAt),
+    phase: phase,
+    kind: kind,
+    game: normalizeGame(kind, raw.game),
+    scores: normalizeScores(raw.scores),
+    feed: normalizeFeed(raw.feed),
+    pack: normalizePack(raw.pack),
+  };
+}
+/* A player list. Sorted by `joinedAt` so the roster's order is the order
+   people arrived and never changes under a reader; de-duplicated by uid in
+   case a listener ever hands over two copies. */
+function normalizePlayers(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map((p) => {
+    if (!p || typeof p !== 'object') return null;
+    const id = String(p.uid == null ? '' : p.uid);
+    if (!ID_RE.test(id) || seen.has(id)) return null;
+    seen.add(id);
+    return {
+      uid: id,
+      nick: String(p.nick == null ? '' : p.nick).trim().slice(0, NICK_MAX) || 'Someone',
+      joinedAt: toMs(p.joinedAt),
+      seenAt: toMs(p.seenAt),
+      ansR: int(p.ansR, 0, 1e6, 0),
+      hue: int(p.hue, 0, 11, 0),
+    };
+  }).filter(Boolean).sort((a, b) => a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1)).slice(0, PLAYERS_MAX);
+}
+/* An answer is a short string, an int, or up to three short strings. The
+   rules cannot look inside a list, so the per-element cap is CLIENT-SIDE ONLY
+   and this is where it is enforced — say so in firestore.rules too. */
+function normalizeAnswerValue(v) {
+  if (typeof v === 'number') return int(v, -1e6, 1e6, 0);
+  if (typeof v === 'string') return v.slice(0, 120);
+  if (Array.isArray(v)) return v.slice(0, 3).map((s) => String(s == null ? '' : s).slice(0, A_MAX));
+  return null;
+}
+function normalizeAnswers(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map((a) => {
+    if (!a || typeof a !== 'object') return null;
+    const id = String(a.uid == null ? '' : a.uid);
+    if (!ID_RE.test(id) || seen.has(id)) return null;
+    const v = normalizeAnswerValue(a.v);
+    if (v === null) return null;
+    seen.add(id);
+    return { uid: id, r: int(a.r, 0, 1e6, 0), v: v, at: toMs(a.at) };
+  }).filter(Boolean).slice(0, PLAYERS_MAX);
+}
+
+/* ── Presence and the handoff, pure ───────────────────────────────────────
+   Both take `t` (the corrected clock) rather than reading one, so the suite
+   can pin them at any moment it likes. nextHost is "the ONLINE player who has
+   been here longest" — smallest joinedAt — and null when nobody is; the
+   current host is a candidate like anyone else, which is what makes a host
+   who merely stepped out for two minutes keep the room. */
+function isOnline(p, t) {
+  return !!p && (t - p.seenAt) < ONLINE_MS;
+}
+function nextHost(list, t) {
+  const online = (list || []).filter((p) => isOnline(p, t));
+  if (!online.length) return null;
+  online.sort((a, b) => a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1));
+  return online[0].uid;
+}
+function hostIsStale(list, hostUid, t) {
+  const h = (list || []).find((p) => p.uid === hostUid);
+  return !h || (t - h.seenAt) >= HOST_STALE_MS;
+}
+
+/* Refuse data from a newer build, with the saved copy untouched, and say why.
+   Deliberately NOT inside load(), whose catch returns a blank state: that is
+   the right answer to corrupt JSON and a catastrophic one here, because a
+   blank state the app then saves overwrites the good copy with nothing.
+
+   Here it has a SECOND job the starter's never had: a ROOM written by a newer
+   build halts this page too, because an old host's next transaction would
+   rewrite that room without the fields the new build added, for everyone in
+   it. `window.brHalted` is what the module and the worker block read. */
+let halted = false;
+function haltForNewerData(found) {
+  halted = true;
+  window.brHalted = true;
+  /* createElement and textContent, never innerHTML: the number came out of
+     storage or off the wire, and data is data, not markup. The inline hex
+     fallbacks are deliberate and are the ONE place a literal colour belongs —
+     this card has to render when theme.css is the thing that failed to load. */
+  const wrap = document.createElement('div');
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:99999;display:flex;'
+    + 'align-items:center;justify-content:center;padding:24px;'
+    + 'background:var(--bg,#0a0e1a);color:var(--text-primary,#e7eaf6);'
+    + 'font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif');
+  const card = document.createElement('div');
+  card.setAttribute('style', 'max-width:34em;border:1px solid var(--border,#262f4a);'
+    + 'border-radius:12px;padding:24px 26px;background:var(--surface,#121829)');
+  const h = document.createElement('h1');
+  h.setAttribute('style', 'margin:0 0 12px;font-size:var(--fs-xl)');
+  h.textContent = 'This Was Saved by a Newer Version';
+  const p1 = document.createElement('p');
+  p1.setAttribute('style', 'margin:0 0 12px');
+  p1.textContent = 'The data uses format ' + String(found)
+    + ', and the copy of the app running here only understands ' + String(SCHEMA)
+    + '. Opening it with this older code would quietly drop the parts it doesn’t '
+    + 'know about — for everyone in the room, if it is a room — so it has stopped instead.';
+  const p2 = document.createElement('p');
+  p2.setAttribute('style', 'margin:0 0 18px;color:var(--text-secondary,#aab2d0)');
+  p2.textContent = 'Nothing has been changed or deleted. This usually means this browser is '
+    + 'still running an older version from its offline cache — connect to the internet and reload.';
+  const btn = document.createElement('button');
+  btn.setAttribute('style', 'font:inherit;font-weight:600;padding:9px 18px;border:0;'
+    + 'border-radius:8px;cursor:pointer;background:var(--btn-bg,#e7eaf6);color:var(--btn-text,#0a0e1a)');
+  btn.textContent = 'Reload';
+  /* A plain reload can be answered by the service worker out of the same stale
+     cache that caused the halt. Unregister first, then reload; the page
+     registers a fresh worker on the next successful load. Only this app's
+     `break-room-shell-` caches are cleared: the origin is shared with the
+     sibling apps and their caches are not ours to delete. */
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Reloading…';
+    try {
+      if (navigator.serviceWorker) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) await reg.unregister();
+      }
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k.startsWith('break-room-shell-'))
+          .map((k) => caches.delete(k)));
+      }
+    } catch (e) { /* nothing to clear, or storage refused — reload anyway */ }
+    location.reload();
+  });
+  card.appendChild(h); card.appendChild(p1); card.appendChild(p2); card.appendChild(btn);
+  wrap.appendChild(card);
+  document.body.appendChild(wrap);
+  /* THROWS, so nothing after it initialises. A half-booted app with handlers
+     attached is one stray click from a save. */
+  throw new Error('halted: data format ' + found);
+}
+
+{
+  let peek = null;
+  try { peek = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); }
+  catch (e) { peek = null; }   /* unparseable is load()'s problem, not this one */
+  if (peek && typeof peek === 'object' && Number(peek.version || 1) > SCHEMA)
+    haltForNewerData(peek.version);
+}
+
+let local = blankLocal();
+
+function load() {
+  try {
+    local = normalizeLocal(JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'));
+  } catch (e) {
+    local = blankLocal();
+  }
+}
+
+/* The single write path for this browser's own data. Nothing from a room ever
+   comes through here — `room`, `players` and `answers` are memory only. */
+function save() {
+  if (halted) return;
+  local.version = SCHEMA;
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+  } catch (e) {
+    toast('Could not save — this browser refused to store the data.');
+  }
+}
+
+/* Same-browser tabs share one copy, so another tab's write has to be adopted or
+   the two last-write-wins each other. Adopt and RENDER only — never save() from
+   here: the event only fires in OTHER tabs, so it cannot loop. (Two tabs in one
+   browser are also ONE anonymous player in the cloud — see the module.) */
+addEventListener('storage', (e) => {
+  if (e.key !== LOCAL_KEY || halted) return;
+  let incoming = null;
+  try { incoming = JSON.parse(e.newValue || 'null'); } catch (err) { return; }
+  if (incoming && Number(incoming.version || 1) > SCHEMA) haltForNewerData(incoming.version);
+  local = normalizeLocal(incoming);
+  render();
+});
+
+/* ═══════════════════════════ The room on screen ══════════════════════════
+   Memory only. `me` is this browser's anonymous uid, handed over by the
+   module once Firebase has answered; `room`, `players` and `answers` are the
+   last normalized snapshots; `offset` is what to add to Date.now() to read the
+   server's clock. All of it is replaced wholesale by each snapshot — nothing
+   here is ever merged, because the host's transaction is the only merge. */
+let me = null;
+let room = null;
+let players = [];
+let answers = [];
+let offset = 0;
+const now = () => Date.now() + offset;
+
+/* ── The games ─────────────────────────────────────────────────────────────
+   A registry, so the lobby's picker and the normalizer read one list and a
+   fifth game is one more object here. Each entry is
+     { id, name, min, max, normalize(raw, base) → game, setup(opts, players) → game,
+       step(room, ctx) → patch|null, encode(input) → v|null, view(room, me, players) → html }
+   and `step()` is the ONLY state-transition function: PURE, so the suite can
+   drive a whole game with fake answers and a fake clock. Filled in from the
+   trivia milestone on; empty here so the boundary already knows the shape. */
+const GAMES = {};
+/* M2-GAMES-SLOT */
+
+/* ═══════════════════════════════ Rendering ═══════════════════════════════ */
+
+/* Which screen: the home card when there is no room, the room otherwise. The
+   home card is DERIVED on every render, never latched — leaving a room is what
+   brings it back, with no special case. */
+function render() {
+  const inRoom = !!room;
+  document.getElementById('homeCard').hidden = inRoom;
+  document.getElementById('roomView').hidden = !inRoom;
+  document.getElementById('inviteBtn').hidden = !inRoom;
+  if (inRoom) renderRoom(); else renderHome();
+}
+
+/* The home card's live parts: the nickname box is filled from storage only
+   while nobody is typing in it, the recent codes are buttons, and the no-cloud
+   note shows when this copy has nothing behind it. */
+function renderHome() {
+  const nick = document.getElementById('nickBox');
+  if (document.activeElement !== nick && !nick.value) nick.value = local.nick;
+  const wrap = document.getElementById('recentWrap');
+  wrap.innerHTML = local.recent.map((r) =>
+    '<button type="button" class="btn-small" data-rejoin="' + esc(r.code) + '" title="Join room '
+    + esc(r.code) + ' again">' + esc(r.code) + '</button>').join('');
+  const cloud = cloudOn();
+  document.getElementById('noCloud').hidden = cloud;
+  document.getElementById('createBtn').disabled = !cloud;
+  document.getElementById('joinBtn').disabled = !cloud;
+}
+
+/* M1-RENDER-SLOT */
+function renderRoom() { /* the lobby and the games arrive with milestone 1 */ }
+
+/* ═══════════════════════════ Dialogs and chrome ═══════════════════════════ */
+
+/* Which controls raise a phone's keyboard. Pure, pinned by tests, and a
+   whitelist for the same reason the field rule is one. */
+function raisesKeyboard(el) {
+  if (!el) return false;
+  const tag = (el.tagName || '').toUpperCase();
+  if (tag === 'TEXTAREA') return true;
+  if (tag !== 'INPUT') return false;
+  return ['text', 'number', 'search', 'tel', 'url', 'email', 'password', ''].
+    indexOf((el.type || '').toLowerCase()) !== -1;
+}
+
+/* Which controls OPEN something the moment they are focused, on a touch
+   screen: the keyboard's, plus a <select> and the date and time pickers.
+   iOS 26 opens a focused select's menu at once — Wine Cellar's Share and
+   Settings windows opened with their first dropdown already down (Charles,
+   iPhone, 2026-10-23) — so openModal() asks this, not raisesKeyboard(). */
+function opensOnFocus(el) {
+  if (!el) return false;
+  if (raisesKeyboard(el)) return true;
+  const tag = (el.tagName || '').toUpperCase();
+  if (tag === 'SELECT') return true;
+  return tag === 'INPUT' && ['date', 'time', 'datetime-local', 'month', 'week']
+    .indexOf((el.type || '').toLowerCase()) !== -1;
+}
+
+/* EVERY modal opens through here, never showModal() directly. showModal() runs
+   the spec's focusing steps — the autofocus element, or failing that the first
+   focusable one — so which dialogs raise a phone's keyboard is otherwise decided
+   by which happen to open on a text box, and the keyboard then covers half the
+   dialog before it has been read. On a COARSE pointer focus goes to the dialog
+   itself instead. Focus still goes INTO the dialog: that part is not optional,
+   or a keyboard or screen-reader user is stranded outside a thing covering the
+   page. A dialog that genuinely wants the keyboard needs no special case: call
+   openModal and then focus the field yourself. */
+function openModal(dlg) {
+  dlg.showModal();
+  if (!matchMedia('(pointer: coarse)').matches) return;
+  const el = document.activeElement;
+  if (!el || !dlg.contains(el)) return;
+  if (!opensOnFocus(el)) return;
+  dlg.tabIndex = -1;
+  dlg.focus();
+}
+
+/* Every dialog closes on a click outside it. Hit-tests against the dialog's BOX
+   rather than `e.target === dialog` (a click on its own padding is still inside
+   the window), and requires the press to have STARTED outside too, so selecting
+   text in a field and releasing past the edge doesn't discard what you typed.
+   The one documented exception in this family is a which-copy-of-your-data-wins
+   dialog, which this app does not have. */
+function closeOnBackdropClick(dlg, onClose) {
+  const dismiss = onClose || function () { dlg.close(); };
+  const outside = (e) => {
+    const r = dlg.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right
+        || e.clientY < r.top  || e.clientY > r.bottom;
+  };
+  let startedOutside = false;
+  dlg.addEventListener('mousedown', (e) => { startedOutside = outside(e); });
+  dlg.addEventListener('click', (e) => {
+    if (startedOutside && outside(e)) dismiss();
+    startedOutside = false;
+  });
+}
+
+const TOAST_POPOVER = 'popover' in HTMLElement.prototype;
+let toastRaised = false, toastTimer = null, toastHideTimer = null;
+function raiseToast(el) {
+  if (!TOAST_POPOVER || toastRaised) return;
+  /* A failure here costs the top layer, never the toast. */
+  try { el.showPopover(); toastRaised = true; } catch (e) {}
+}
+function dropToast(el) {
+  if (!toastRaised) return;
+  try { el.hidePopover(); } finally { toastRaised = false; }
+}
+function toast(msg, ms) {
+  const el = document.getElementById('toast');
+  clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  /* Raised BEFORE the text is written: a popover is display:none until shown,
+     and a live region announces a change it was there for. */
+  raiseToast(el);
+  el.textContent = msg;
+  /* That display flip means the opacity:0 starting state is never painted, so
+     the fade would be skipped entirely; reading a layout property settles it. */
+  void el.offsetWidth;
+  el.classList.add('show');
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    /* Leaves the top layer once faded, so a spent toast is never parked above
+       whatever opens next. Matches the .2s transition. */
+    toastHideTimer = setTimeout(() => dropToast(el), 250);
+  }, Number(ms) > 0 ? Number(ms) : 3200);
+}
+window.toast = toast;
+
+/* A box you land on has its contents SELECTED, so typing replaces the value
+   rather than running on to the end of it. One delegated `focusin` listener,
+   which bubbles where `focus` does not. The one-shot mouseup guard is for a
+   POINTER-driven focus: a click focuses on mousedown and then places the caret
+   on mouseup, collapsing the selection made a moment earlier. A TEXTAREA is
+   never touched, and `data-keep-caret` is the by-hand opt-out. `search` is
+   deliberately absent. */
+const SELECT_ON_FOCUS = ['text', 'number', 'tel', 'url', 'email'];
+/* WHICH ELEMENT the current press landed on, cleared when the press ends. It
+   used to be a bare true/false that nothing reset, and the cancel then ate the
+   NEXT release anywhere on the page — a number box's arrow never let go (Wine
+   Cellar, 2026-10-23). Now the cancel is armed only when THIS press focused
+   THIS box, and only ever cancels a release on that same box. */
+let pressedOn = null;
+addEventListener('pointerdown', (e) => { pressedOn = e.target; }, true);
+addEventListener('pointerup', () => { pressedOn = null; }, true);
+addEventListener('pointercancel', () => { pressedOn = null; }, true);
+addEventListener('focusin', (e) => {
+  const el = e.target;
+  const byThisPress = pressedOn === el;
+  pressedOn = null;
+  if (!el || el.tagName !== 'INPUT') return;
+  if (el.hasAttribute('data-keep-caret')) return;
+  if (SELECT_ON_FOCUS.indexOf((el.type || '').toLowerCase()) === -1) return;
+  el.select();
+  if (!byThisPress) return;
+  /* NEVER on a number box: Chrome stops a spin arrow repeating only when it
+     sees the release — cancel the release and ONE click keeps stepping. */
+  if ((el.type || '').toLowerCase() === 'number') return;
+  const keep = (ev) => { if (ev.target === el) ev.preventDefault(); };
+  addEventListener('mouseup', keep, { once: true, capture: true });
+});
+
+/* A FOCUSED NUMBER BOX IGNORES THE MOUSE WHEEL (2026-10-23). Chrome steps a
+   focused <input type="number"> on every wheel tick over it. The box loses
+   focus on the first tick, which stops the step and lets the window scroll. */
+addEventListener('wheel', (e) => {
+  const el = e.target;
+  if (el && el.tagName === 'INPUT' && el.type === 'number' && el === document.activeElement) el.blur();
+}, { passive: true, capture: true });
+
+/* ═══════════════════════════════ Theme ═══════════════════════════════════ */
+
+function applyThemeColor() {
+  const bar = document.querySelector('meta[name="theme-color"]');
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  if (bar && bg) bar.setAttribute('content', bg);
+}
+
+function setTheme(theme) {
+  if (theme === 'slate') theme = 'dark';
+  const valid = ['auto', 'midnight', 'dark', 'light', 'sepia'];
+  if (valid.indexOf(theme) === -1) theme = 'auto';
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+  document.getElementById('themeSel').value = theme;
+  applyThemeColor();
+}
+
+/* On Auto the palette can change with nobody touching the picker — the reader's
+   system switches at sunset and theme.css follows on its own. What does NOT
+   follow is anything script decided: the theme-color meta tag. */
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (document.documentElement.getAttribute('data-theme') === 'auto') applyThemeColor();
+});
+
+/* ── A row that scrolls sideways, and the two arrows beside it ───────────────
+   The header's controls are a single scrolling line at every width (2026-09-14,
+   family-wide; Money Map's function, verbatim). `nav` is a box holding the two
+   arrows: shown only while the row has something off an end, each arrow
+   disabled at its own end, and a press moving the row most of its own width.
+   Kept true without anyone calling it by the row's own scroll, a ResizeObserver
+   and a MutationObserver. Wired here, before boot(): the row is static markup,
+   and the observers catch whatever the first render changes. */
+function wireScrollRow(row, nav) {
+  if (!row || !nav) return;
+  const [prev, next] = nav.querySelectorAll('button');
+  const sync = () => {
+    const room = row.scrollWidth - row.clientWidth;
+    nav.hidden = room <= 1;
+    prev.disabled = row.scrollLeft <= 1;
+    next.disabled = row.scrollLeft >= room - 1;
+  };
+  const step = (dir) => { row.scrollLeft += dir * Math.max(80, Math.round(row.clientWidth * 0.8)); };
+  prev.onclick = () => step(-1);
+  next.onclick = () => step(1);
+  /* A CONTROL REACHED FROM THE KEYBOARD LANDS WHOLE INSIDE THE ROW. The
+     browser scrolls a focused element into view only when it is entirely
+     hidden, so Tab onto a button half past the edge left it half past the
+     edge. Measured against the PADDING edge, so the 4px bought for the focus
+     ring stays the ring's. Only a `:focus-visible` focus. */
+  row.addEventListener('focusin', (e) => {
+    const t = e.target;
+    if (t === row || !t.matches(':focus-visible')) return;
+    const cs = getComputedStyle(row);
+    const padL = parseFloat(cs.paddingLeft) || 0, padR = parseFloat(cs.paddingRight) || 0;
+    const box = row.getBoundingClientRect(), tr = t.getBoundingClientRect();
+    if (tr.left < box.left + padL) row.scrollLeft += tr.left - box.left - padL;
+    else if (tr.right > box.right - padR) row.scrollLeft += tr.right - box.right + padR;
+  });
+  row.addEventListener('scroll', sync, { passive: true });
+  if ('ResizeObserver' in window) new ResizeObserver(sync).observe(row);
+  new MutationObserver(sync).observe(row, { subtree: true, childList: true, characterData: true,
+    attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+  window.addEventListener('resize', sync);
+  sync();
+}
+wireScrollRow(document.querySelector('.headctl'), document.querySelector('.headrow > .rownav'));
+/* The pinned header's height, for `html { scroll-padding-top }` — see the note
+   beside that rule. Observed rather than read once: the bar changes depth with
+   the window, the zoom and the name wrapping. Golf Handicap's, verbatim. */
+(() => {
+  const head = document.querySelector('header');
+  if (!head || !('ResizeObserver' in window)) return;
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--head-h', Math.ceil(head.getBoundingClientRect().height) + 'px');
+  }).observe(head);
+})();
+
+/* ═══════════════════════════════ Wiring ═══════════════════════════════════ */
+
+const $ = (id) => document.getElementById(id);
+
+/* Whether there is any cloud behind this page. The module at the foot sets
+   `window.brCloud` once it has read its config; `on` is false while the
+   config is null, inside the test harness, and after a halt. Read live, never
+   cached — the module is deferred and runs after this script. */
+function cloudOn() {
+  return !!(window.brCloud && window.brCloud.on) && !halted;
+}
+
+/* The nickname is remembered the moment it is used, trimmed and capped in
+   CODE as well as by maxlength — a paste ignores the attribute. */
+function readNick() {
+  const nick = $('nickBox').value.trim().slice(0, NICK_MAX);
+  if (!nick) { $('homeWarn').textContent = 'Pick a nickname first.'; $('nickBox').focus(); return null; }
+  $('homeWarn').textContent = '';
+  if (nick !== local.nick) { local.nick = nick; save(); }
+  return nick;
+}
+function readCode() {
+  const code = cleanCode($('joinCode').value);
+  if (!CODE_RE.test(code)) {
+    $('homeWarn').textContent = 'A room code is six letters or numbers, like 7KQ4M2 — no O, 0, I or 1.';
+    $('joinCode').focus();
+    return null;
+  }
+  $('homeWarn').textContent = '';
+  return code;
+}
+/* M1-WIRING-SLOT */
+$('createBtn').addEventListener('click', () => { if (readNick()) toast('Rooms arrive with the next milestone.'); });
+$('joinBtn').addEventListener('click', () => { if (readNick() && readCode()) toast('Rooms arrive with the next milestone.'); });
+$('joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('joinBtn').click(); } });
+$('nickBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('createBtn').click(); } });
+$('recentWrap').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-rejoin]');
+  if (!b) return;
+  $('joinCode').value = b.getAttribute('data-rejoin');
+  $('joinBtn').click();
+});
+
+/* ── The info dots ──────────────────────────────────────────────────────────
+   A dot goes wherever a number on screen is the result of arithmetic the reader
+   cannot see, or a word means something the page cannot show — and NOWHERE
+   ELSE. The text is a LITERAL in this file, every time: these bodies are
+   written with innerHTML so they can carry <strong> and more than one
+   paragraph, and nothing a reader typed may ever reach it. One delegated
+   listener, so a dot added by a later render needs no wiring. */
+const HELP = {
+  code: ['How a Room Code Works', `<p>A room is <strong>six letters or numbers</strong> from an alphabet with no O, 0, I or 1, so a code read out over a call cannot be misheard into a different room. Anyone holding the code can join — there is no password, and the code is deliberately not something that can be guessed or listed.</p>
+    <p>A room <strong>lives for six hours</strong> from the moment it is started; the host can extend it two hours at a time up to twelve. Once it has expired nobody can join or play, and the room and everything in it is <strong>deleted within a day</strong>.</p>`],
+  /* M1-HELP-SLOT */
+};
+const helpDialog = $('helpDialog');
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest ? e.target.closest('.tile-help') : null;
+  if (!btn) return;
+  const h = HELP[btn.dataset.help];
+  if (!h) return;
+  $('helpTitle').textContent = h[0];
+  $('helpBody').innerHTML = h[1];
+  openModal(helpDialog);
+});
+$('helpCloseBtn').addEventListener('click', () => helpDialog.close());
+
+/* ── Back up and restore ──────────────────────────────────────────────────── */
+$('dataBtn').addEventListener('click', () => openModal($('dataDialog')));
+$('dataClose').addEventListener('click', () => $('dataDialog').close());
+
+/* What a backup holds: the nickname and the custom packs. NOT the room code
+   and NOT the recent list — a room is an evening's thing and a backup is for
+   keeps. Named, not an inline handler: the delete-all dialog offers the very
+   same download as its safety net, and the two must never drift apart. */
+function backupPayload(l) {
+  return { version: SCHEMA, nick: l.nick, packs: l.packs.map((p) => ({ name: p.name, qs: p.qs })) };
+}
+function downloadBackup() {
+  const blob = new Blob([JSON.stringify(backupPayload(local), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'break-room-backup-' + todayISO() + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Backup downloaded');
+}
+$('exportBtn').addEventListener('click', downloadBackup);
+
+/* Dates are calendar days with no time on them. NEVER reach for toISOString()
+   here: it converts to UTC and silently shifts every date back a day for anyone
+   east of Greenwich. Build the string from LOCAL parts. */
+function todayISO() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+$('importBtn').addEventListener('click', () => $('importFile').click());
+$('importFile').addEventListener('change', () => {
+  const file = $('importFile').files && $('importFile').files[0];
+  const input = $('importFile');
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    input.value = '';                 /* so the same file can be picked twice */
+    let raw = null;
+    try { raw = JSON.parse(String(reader.result)); }
+    catch (e) { toast('That file is not a backup this app can read.'); return; }
+    /* The same newer-build boundary as boot. A backup file is exactly the copy
+       most likely to have been written by a newer build. */
+    if (raw && Number(raw.version || 1) > SCHEMA) haltForNewerData(raw.version);
+    const incoming = normalizeLocal(raw);
+    const n = incoming.packs.length;
+    /* SAY WHAT THE FILE HOLDS before replacing anything. */
+    if (!confirm('Restore ' + n + (n === 1 ? ' custom pack' : ' custom packs')
+               + (incoming.nick ? ' and the nickname “' + incoming.nick + '”' : '')
+               + '?\n\nThis replaces the packs and nickname in this browser. The room you are in, if any, is untouched.')) return;
+    local.packs = incoming.packs;
+    if (incoming.nick) local.nick = incoming.nick;
+    save();
+    $('nickBox').value = '';
+    render();
+    $('dataDialog').close();
+    toast('Backup restored');
+  };
+  reader.readAsText(file);
+});
+
+const clearDialog = $('clearDialog');
+
+$('clearBtn').addEventListener('click', () => {
+  /* Closed first rather than stacked: a confirmation is the whole screen's
+     business, and backing out of it should not drop you into the dialog you
+     started from as though nothing had been asked. */
+  $('dataDialog').close();
+  const n = local.packs.length;
+  $('clearBody').textContent =
+    `This deletes your nickname, ${n} custom pack${n === 1 ? '' : 's'} and the list of recent rooms from this browser`
+    + (room ? ', and leaves the room you are in' : '') + '. Your theme is kept. '
+    + `There is no undo — a downloaded backup is the only way to get any of it back.`;
+  openModal(clearDialog);
+});
+
+$('clearBackupBtn').addEventListener('click', downloadBackup);
+$('clearCancel').addEventListener('click', () => clearDialog.close());
+$('clearConfirm').addEventListener('click', () => {
+  /* M1-CLEAR-LEAVE-SLOT */
+  local = blankLocal();
+  save();
+  $('nickBox').value = '';
+  $('joinCode').value = '';
+  render();
+  clearDialog.close();
+  toast('Everything deleted');
+});
+
+$('themeSel').addEventListener('change', (e) => setTheme(e.target.value));
+
+/* Registered together at the foot, as in every sibling. A dialog whose `const`
+   is declared further down registers beside its own wiring instead. */
+['dataDialog', 'clearDialog', 'helpDialog'].forEach((id) => closeOnBackdropClick($(id)));
+
+/* ═══════════════════════════════ Boot ═════════════════════════════════════ */
+
+function boot() {
+  load();
+  setTheme(localStorage.getItem(THEME_KEY) || 'auto');
+  render();
+  /* The page is now drawn where it belongs, so let it be seen. In the SAME TASK
+     as the render above — a frame later and the reveal is itself the flash. The
+     head script explains what was flashing before it. */
+  document.documentElement.removeAttribute('data-booting');
+}
+
+boot();
+
+/* The test harness reaches the `const` values through this; function
+   declarations it finds on window by itself. The `__plant*` hooks replace the
+   state IN MEMORY and redraw — they never call save(), because this suite is
+   read-only about storage and runs against the reader's own copy of the app. */
+window.__brTestHooks = {
+  __plantLocal: function (next) { local = normalizeLocal(next); render(); },
+  __local: function () { return local; },
+  __plantRoom: function (raw) { room = raw ? normalizeRoom(raw) : null; render(); },
+  __plantPlayers: function (list) { players = normalizePlayers(list); render(); },
+  __plantAnswers: function (list) { answers = normalizeAnswers(list); render(); },
+  __setMe: function (id) { me = id; render(); },
+  __room: function () { return room; },
+  __players: function () { return players; },
+  __answers: function () { return answers; },
+  __me: function () { return me; },
+  SCHEMA: SCHEMA, ID_RE: ID_RE, LOCAL_KEY: LOCAL_KEY, THEME_KEY: THEME_KEY,
+  CODE_RE: CODE_RE, CODE_ALPHABET: CODE_ALPHABET, CODE_LEN: CODE_LEN,
+  NICK_MAX: NICK_MAX, PLAYERS_MAX: PLAYERS_MAX, FEED_MAX: FEED_MAX, PACK_QS_MAX: PACK_QS_MAX,
+  Q_MAX: Q_MAX, A_MAX: A_MAX, PACKS_MAX: PACKS_MAX, RECENT_MAX: RECENT_MAX,
+  ROOM_MS: ROOM_MS, EXTEND_MS: EXTEND_MS, ROOM_MAX_MS: ROOM_MAX_MS, HEARTBEAT_MS: HEARTBEAT_MS,
+  ONLINE_MS: ONLINE_MS, HOST_STALE_MS: HOST_STALE_MS, HOST_OVERDUE_MS: HOST_OVERDUE_MS,
+  PHASES: PHASES, KINDS: KINDS, GAMES: GAMES,
+  blankLocal: blankLocal, normalizeLocal: normalizeLocal, normalizePack: normalizePack,
+  normalizeRoom: normalizeRoom, normalizePlayers: normalizePlayers, normalizeAnswers: normalizeAnswers,
+  normalizeScores: normalizeScores, normalizeFeed: normalizeFeed, toMs: toMs, int: int, num: num,
+  isOnline: isOnline, nextHost: nextHost, hostIsStale: hostIsStale,
+  randomCode: randomCode, cleanCode: cleanCode, esc: esc, todayISO: todayISO,
+  raisesKeyboard: raisesKeyboard, opensOnFocus: opensOnFocus, backupPayload: backupPayload,
+  /* M1-HOOKS-SLOT */
+};
+</script>
+
+<!-- M1-MODULE-SLOT -->
+<script type="module">
+/* ───────────────────────── The cloud: where a room lives ────────────────────
+   Arrives whole with milestone 1. Until then the config is null and this
+   page is fully local: every door on the home card says so. */
+const FIREBASE_CONFIG = null;
+window.brCloud = { on: false };
+</script>
+
+<!-- ── The offline worker ────────────────────────────────────────────────────
+     Its own script block, and registration is guarded three ways, all
+     load-bearing:
+
+     • NOT IN A FRAME. tests.html boots this page in a hidden iframe, and a suite
+       run that installed a worker would then be testing whatever it had cached.
+
+     • NOT UNDER window.brHalted — a page stopped by haltForNewerData(). This is
+       a separate script block, so the halt's `throw` never reaches it, and the
+       flag is what stops it.
+
+     • AFTER LOAD. Registration competes with the app's own first paint
+       otherwise, and offline is worth nothing on the visit where you are online.
+
+     No `updatefound` prompt, deliberately. Under network-first there is nothing
+     to prompt about: the page you are reading came off the network, so it is
+     already current, and the worker only ever matters on a visit where the
+     network failed. -->
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (window.top !== window.self) return;
+  if (window.brHalted) return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js', { scope: './' })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) {
+        /* Ask the worker to repair any missing shell file. `install` fires ONCE
+           per script version, so if the cache is later evicted nothing would
+           rebuild it and offline would quietly rot to "whatever the last visit
+           happened to request". */
+        if (reg.active) reg.active.postMessage({ type: 'shell-check' });
+      })
+      .catch(function () { /* offline is a bonus; never break the page for it */ });
+  });
+})();
+</script>
+</body>
+</html>

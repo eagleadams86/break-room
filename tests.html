@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="midnight">
+<head>
+<meta charset="utf-8">
+<!-- frame-src 'self' is what lets the hidden iframe below load index.html.
+     Without it the frame is refused by default-src and the suite reports that
+     the app exposed no hooks — which reads as an app bug and is a CSP one. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Break Room — Tests</title>
+<style>
+  /* Dev-only page. Colours are Midnight from the theme pack, HARD-CODED on
+     purpose: this page must keep working when theme.css is the thing that
+     broke, so it is the one file here that does not link it. */
+  body { background: #0a0e1a; color: #e7eaf6; margin: 0;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #838cab; font-size: 12.5px; margin: 0 0 18px; }
+  #summary { font-weight: 600; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px;
+             border: 1px solid #262f4a; background: #121829; }
+  #summary.ok  { color: #72fe84; border-color: #72fe84; }
+  #summary.bad { color: #fb7874; border-color: #fb7874; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 6px 8px; border-bottom: 1px solid #262f4a; vertical-align: top; }
+  td.st { width: 28px; font-weight: 700; }
+  tr.pass td.st { color: #72fe84; }
+  tr.fail td.st { color: #fb7874; }
+  tr.fail td.msg { color: #fb7874; }
+  .msg { color: #838cab; font-size: 12px; white-space: pre-wrap; }
+  .group td { padding-top: 16px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+              text-transform: uppercase; color: #838cab; border-bottom-color: #374163; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Break Room — Tests</h1>
+  <p class="sub">Loads the real index.html in a hidden iframe and calls its functions directly
+    — no copies, no build step, so a test cannot drift from the code it tests. Read-only:
+    nothing here writes to storage, and the cloud module never loads inside the frame.</p>
+  <div id="summary">Loading…</div>
+  <table><tbody id="out"></tbody></table>
+</div>
+
+<script>
+'use strict';
+
+/* ── The completeness floor ────────────────────────────────────────────────
+   Every tests.html in this family pins the number of tests it expects to RUN.
+   Removing a test fails the build; adding one never does. Without it, tests that
+   go MISSING look exactly like tests that pass — a suite that quietly shrank to
+   three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
+   lower it only when you retire one deliberately. */
+const EXPECTED = 94;
+
+/* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
+   GitHub Pages publishes this page BESIDE the app, where the iframe below would
+   be the reader's real, saved copy — and booting the app IS the side effect, so
+   the check cannot live in the load handler. `file://` is deliberately NOT in
+   this list: it has no hostname, and treating '' as local sends the page down
+   the iframe branch, where the frame silently fails to load and the suite blames
+   the app for what is a setup problem. */
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+/* Bust the frame AND the source fetches. They are different caches and they can
+   disagree: in the lottery repo this same harness once reported ALL GREEN
+   against a page three features out of date, because the source-level tests read
+   the file off the server while the frame ran a copy the browser had cached.
+   Nothing errored; the new code was simply never run. A suite that can pass
+   against a build which exists nowhere is worse than no suite — it turns
+   "untested" into "verified". */
+const BUST = '?t=' + Date.now();
+const bustFetch = (path) => fetch(path + BUST, { cache: 'no-store' });
+
+const TESTS = [];
+function group(name) { TESTS.push({ group: name }); }
+function t(name, fn) { TESTS.push({ name: name, fn: fn }); }
+/* `detail` is the value that FAILED, not more prose: `ok(w <= pin, 'it fits',
+   w + 'px')` says what was expected and then shows what was actually there.
+   Every suite in the family takes three arguments now (2026-08-26). It was two
+   here, and a call site passing a third had its diagnostic silently dropped —
+   the assertion still failed correctly, it just refused to say what it saw.
+   CodeQL's js/superfluous-trailing-arguments caught it three separate times in
+   one day, in three different repos, which is what settled the signature. */
+function ok(cond, note, detail) {
+  if (cond) return;
+  throw new Error((note || 'expected truthy')
+    + (detail === undefined ? '' : ' \u2014 got ' + detail));
+}
+function eq(actual, expected, note) {
+  const a = JSON.stringify(actual), b = JSON.stringify(expected);
+  if (a !== b) throw new Error((note ? note + ' — ' : '') + 'got ' + a + ', wanted ' + b);
+}
+/* A loop, not a single .replace(): one pass over a multi-character delimiter can
+   leave a NEW opener behind that the pass has already gone past. CodeQL flags the
+   single-pass version and it was open on five of the nine public repos at once.
+   Nothing here renders what it strips — the reason to fix it is that a helper
+   which can be fooled about what is commented out is one that can miss a live
+   off-origin script, which is what these suites exist to catch. */
+/* The text a READER sees, tags removed. Deliberately a scanner and not
+   `replace(/<[^>]+>/g, '')`: a single-pass tag strip is the shape CodeQL flags as
+   incomplete multi-character sanitization, and it is right to — one pass over
+   `<<p>p>` leaves a live tag behind. Nothing here is rendered, so the bug that
+   shape would cause here is only a wrong CHARACTER COUNT, but the alert it raises
+   is a real High sitting open on the security tab, where a true finding would be
+   missed among it. Callers normalise whitespace themselves, as they did before. */
+function visibleText(html) {
+  let out = '', inTag = false;
+  for (const ch of html) {
+    if (ch === '<') { inTag = true; continue; }
+    if (ch === '>') { inTag = false; continue; }
+    if (!inTag) out += ch;
+  }
+  return out;
+}
+
+function stripComments(src) {
+  let out = src, prev;
+  do { prev = out; out = out.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, ''); }
+  while (out !== prev);
+  return out;
+}
+
+let W = null, H = null;
+let APP_SRC = '', PRIVACY_SRC = '', THEME_SRC = '', SW_SRC = '', KILL_SRC = '', MANIFEST_SRC = '', RULES_SRC = '';
+
+async function main() {
+  if (LOCAL_HOSTS.indexOf(location.hostname) === -1) {
+    const s = document.getElementById('summary');
+    s.className = 'bad';
+    s.textContent = 'This suite only runs on http://localhost — it boots the real app in a '
+      + 'frame, which must never happen on the published site. Serve this folder and open '
+      + 'http://localhost:<port>/tests.html';
+    return;
+  }
+
+  APP_SRC      = await (await bustFetch('index.html')).text();
+  PRIVACY_SRC  = await (await bustFetch('privacy.html')).text();
+  THEME_SRC    = await (await bustFetch('theme.css')).text();
+  SW_SRC       = await (await bustFetch('sw.js')).text();
+  KILL_SRC     = await (await bustFetch('sw-kill.js')).text();
+  MANIFEST_SRC = await (await bustFetch('manifest.webmanifest')).text();
+  RULES_SRC    = await (await bustFetch('firestore.rules')).text();
+
+  /* ── Guard the source actually loaded, BEFORE any negative assertion ───────
+     An all-NOT test over a fetched file proves nothing when the fetch failed:
+     every "must not contain" passes on an empty string, and the suite goes green
+     having read nothing. */
+  ok(APP_SRC.length > 2000, 'index.html did not load — every check below would pass on an empty string');
+  ok(PRIVACY_SRC.length > 500, 'privacy.html did not load');
+  ok(THEME_SRC.length > 2000, 'theme.css did not load — is it beside these files?');
+  ok(SW_SRC.length > 500, 'sw.js did not load');
+  ok(KILL_SRC.length > 100, 'sw-kill.js did not load — the escape hatch has to exist BEFORE it is needed');
+  ok(MANIFEST_SRC.length > 100, 'manifest.webmanifest did not load');
+  ok(RULES_SRC.length > 2000, 'firestore.rules did not load — the caps below are checked against it');
+
+  W = await bootApp();
+  H = W.__brTestHooks;
+  define();
+  await runAsync();
+  await run();
+}
+
+function bootApp() {
+  return new Promise((resolve, reject) => {
+    const frame = document.createElement('iframe');
+    frame.title = 'app under test';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('data-br-tests', '');
+    frame.style.cssText = 'position:absolute;width:1000px;height:800px;left:-9999px;top:0';
+    frame.addEventListener('load', () => {
+      const win = frame.contentWindow;
+      /* Wrapped: reading a property of a frame the CSP refused throws a
+         SecurityError, and an uncaught one here never reaches the catch below —
+         the suite then sits on "Loading…" saying nothing at all. */
+      let hooks = null;
+      try { hooks = win && win.__brTestHooks; } catch (e) { hooks = null; }
+      if (hooks) { resolve(win); return; }
+      let booted = false, blocked = false;
+      try { booted = !!(win.document && win.document.getElementById('homeCard')); }
+      catch (e) { blocked = true; }
+      reject(new Error(blocked
+        ? 'the frame could not be read at all — this page’s CSP needs frame-src \'self\'.'
+        : booted
+          ? 'index.html loaded but exposed no __brTestHooks — did something throw while '
+            + 'it was starting up? Check the browser console.'
+          : 'The hidden frame never loaded index.html — is it being served?'));
+    }, { once: true });
+    frame.src = 'index.html' + BUST;   /* set before append: one load event, the real one */
+    document.body.appendChild(frame);
+  });
+}
+
+/* The two async checks are run up front and their VERDICTS recorded, so a test
+   body stays a plain function that either throws or doesn't. */
+const asyncResults = {};
+async function runAsync() {
+  /* ── The render smoke test ────────────────────────────────────────────────
+     Everything else in this suite calls a pure function or reads the source as
+     text. That leaves the render layer never executed at all, and a throw
+     inside a view would ship green. So this walks the app the way a person
+     does: the home card, then a planted room through every phase it has, then
+     every dialog opened and closed, recording anything the frame throws. It
+     cannot tell a right figure from a wrong one; it is the difference between
+     "the maths is right" and "the app runs". */
+  try {
+    const errs = [];
+    W.addEventListener('error', (e) => errs.push(String(e.message)));
+    W.addEventListener('unhandledrejection', (e) => errs.push('unhandled rejection: ' + e.reason));
+    const drawn = {};
+    const doc = W.document;
+    H.__plantRoom(null);
+    H.__plantLocal(FIXTURE_LOCAL);
+    drawn['view:home'] = doc.getElementById('homeCard').textContent.trim().length;
+    /* M1-SMOKE-SLOT */
+    H.__plantRoom(null);
+    const dialogs = [...doc.querySelectorAll('dialog')].filter((d) => d.id);
+    for (const d of dialogs) {
+      try { d.showModal(); drawn['dialog:' + d.id] = d.textContent.trim().length; d.close(); }
+      catch (e) { errs.push('dialog ' + d.id + ': ' + e.message); }
+    }
+    asyncResults.smoke = { errs: errs, drawn: drawn, dialogs: dialogs.length };
+  } catch (e) { asyncResults.smoke = { errs: ['the walk itself threw: ' + e.message], drawn: {}, dialogs: 0 }; }
+  try { H.__plantRoom(null); H.__plantLocal(FIXTURE_LOCAL); } catch (e) { /* reported by the walk's own verdict */ }
+}
+
+/* ── The suite plants what it needs, and never trusts what it finds ──────────
+   A fixed local record and a fixed room, so a test asserting an order cannot
+   drift with the reader's own browser. Uids are 28 alphanumerics, the shape
+   Firebase mints, so the fixtures exercise the real ID_RE path. */
+const U = { host: 'HOSTaaaaaaaaaaaaaaaaaaaaaaaa', b: 'BBBBbbbbbbbbbbbbbbbbbbbbbbbb',
+            c: 'CCCCcccccccccccccccccccccccc', d: 'DDDDdddddddddddddddddddddddd' };
+const FIXTURE_LOCAL = { version: 1, nick: 'Ada', code: '', packs: [], recent: [{ code: 'ABCDEF', at: 1 }] };
+const T0 = 1800000000000;   /* a fixed "now", so every clock in the fixtures is relative to it */
+function fixtureRoom(over) {
+  return Object.assign({
+    host: U.host, rev: 3, schema: 1, createdAt: T0 - 60000, expiresAt: T0 + 5 * 3600000,
+    phase: 'lobby', kind: null, game: {}, scores: {}, feed: [], pack: null,
+  }, over || {});
+}
+function fixturePlayers() {
+  return [
+    { uid: U.host, nick: 'Ada', joinedAt: T0 - 60000, seenAt: T0 - 1000, ansR: 0, hue: 0 },
+    { uid: U.b, nick: 'Ben', joinedAt: T0 - 50000, seenAt: T0 - 2000, ansR: 0, hue: 1 },
+    { uid: U.c, nick: 'Cat', joinedAt: T0 - 40000, seenAt: T0 - 10 * 60000, ansR: 0, hue: 2 },
+  ];
+}
+
+function define() {
+  const booted = !!W.document.getElementById('homeCard') && !W.document.getElementById('homeCard').hidden;
+  H.__plantLocal(FIXTURE_LOCAL);
+
+  group('the suite plants its own data');
+  t('the app is rendered from a FIXTURE, not from this browser’s saved copy', () => {
+    ok(booted, 'the app booted onto the home card with no room');
+    eq(H.__local().nick, 'Ada', 'and the suite then planted its own local record');
+    eq(H.__local().recent.length, 1, 'with one recent code');
+    ok(W.document.querySelector('#recentWrap [data-rejoin="ABCDEF"]'), 'so there is a recent-room button to read');
+    /* The promise this suite makes about the reader's own data — read off the
+       app's source, not asserted against nothing. */
+    const hook = (stripComments(APP_SRC).match(/__plantLocal: function[^\n]*/) || [''])[0];
+    ok(hook, 'the plant hook must exist');
+    ok(hook.indexOf('save()') === -1, 'plant must never write — this suite runs against the reader’s own copy');
+  });
+  t('the cloud module never loads inside the harness', () => {
+    ok(W.frameElement && W.frameElement.hasAttribute('data-br-tests'), 'the frame carries the harness mark');
+    eq(!!(W.brCloud && W.brCloud.on), false, 'and the module reports no cloud in it');
+    const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+    ok(mod, 'the module exists');
+    ok(!/<script[^>]+src="https?:/.test(APP_SRC), 'the SDK is never a <script src> — only a dynamic import() behind the harness guard');
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE FAMILY RULES. Each pins something that went wrong in this family at
+     least once. They cost nothing and they are the only thing that notices
+     when a page stops following the pack it links.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  group('the palette and type come from the pack, not from this page');
+  t('no raw pixel font size anywhere in the app', () => {
+    /* ONE exemption, removed by name: the newer-data card is built in script and
+       has to render when theme.css is the thing that failed to load. */
+    const body = stripComments(APP_SRC).replace(/font:16px\/1\.55 system-ui[^']*/g, '');
+    const hits = (body.match(/font-size\s*:\s*[0-9.]+px/g) || [])
+      .concat(body.match(/font:\s*[0-9.]+px/g) || []);
+    eq(hits, [], 'raw pixel sizes opt that text out of the reader’s own text-size setting');
+  });
+  t('no font stack of its own — --font-sans is the pack’s', () => {
+    const body = stripComments(APP_SRC).replace(/font:16px\/1\.55 system-ui,[^']*/g, '');
+    ok(!/-apple-system/.test(body), 'the family stack lives in --font-sans; a local copy drifts');
+    ok(/var\(--font-sans\)/.test(APP_SRC), 'and the body shorthand must use it');
+    ok(/var\(--font-mono\)/.test(APP_SRC), 'and the room code reads in the pack’s mono face');
+  });
+  t('no literal colour inside the <style> block', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(css.length > 500, 'the style block was not found, so this check read nothing');
+    eq(css.match(/#[0-9a-f]{3,8}\b/gi) || [], [],
+       'a colour is decided in the pack’s tokens.json or it is not decided');
+  });
+  t('and outside it, only the literals that must survive a missing theme.css', () => {
+    const outside = stripComments(APP_SRC).replace(/<style>[\s\S]*?<\/style>/, '');
+    const found = [...new Set((outside.match(/#[0-9a-f]{6}\b/gi) || []).map(h => h.toLowerCase()))];
+    const allowed = ['#0a0e1a', '#121829', '#262f4a', '#aab2d0', '#e7eaf6', '#ebebe8',
+                     '#818cf8', '#a5b4fc', '#141c33'];
+    eq(found.filter(h => allowed.indexOf(h) === -1), [], 'unexpected literal colour(s)');
+    const el = W.document.documentElement, was = el.getAttribute('data-theme');
+    try {
+      el.setAttribute('data-theme', 'midnight');
+      eq(W.getComputedStyle(el).getPropertyValue('--bg').trim(), '#0a0e1a',
+         'the theme-color meta and the halt card use Midnight’s --bg');
+      el.setAttribute('data-theme', 'light');
+      eq(W.getComputedStyle(el).getPropertyValue('--bg').trim(), '#ebebe8',
+         'and the boot script uses Light’s');
+    } finally { el.setAttribute('data-theme', was || 'auto'); }
+  });
+  t('the pack is LINKED, never inlined', () => {
+    ok(/<link[^>]+href="theme\.css"/.test(APP_SRC), 'index.html must link theme.css');
+    ok(/<link[^>]+href="theme\.css"/.test(PRIVACY_SRC), 'privacy.html must link it too');
+    ok(!/--text-primary:\s*#/.test(stripComments(APP_SRC)),
+       'an inlined copy is drift with a delay fuse — a pack change misses it silently');
+  });
+  t('a disabled button looks disabled — pack rule 20 reaches this page’s buttons', () => {
+    const b = W.document.getElementById('createBtn');
+    ok(b, 'the home card’s primary button exists');
+    const was = b.disabled;
+    try {
+      b.disabled = false;
+      eq(W.getComputedStyle(b).opacity, '1', 'an enabled primary is at full strength');
+      b.disabled = true;
+      const cs = W.getComputedStyle(b);
+      eq(cs.opacity, '0.45', 'a disabled one is dimmed');
+      eq(cs.cursor, 'not-allowed', 'and says so under the pointer');
+    } finally { b.disabled = was; }
+    ok(/button:disabled \{ opacity: \.45; cursor: not-allowed; \}/.test(THEME_SRC || ''),
+       'the rule comes from theme.css, not from a copy in this page');
+  });
+  t('privacy.html carries style-src ‘self’, or the link is silently blocked', () => {
+    const csp = (PRIVACY_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
+    ok(/style-src[^;]*'self'/.test(csp), 'without it the stylesheet is refused and the page renders bare');
+  });
+  t('the avatars and the online dot are the pack’s tokens, never an invented colour', () => {
+    /* Pack rule 4 for the avatars (the categorical ramp, in order) and the
+       red-green rule for the dot: away is --text-muted, an absence, never red. */
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5'].forEach((tok) =>
+      ok(css.indexOf('var(' + tok + ')') > -1, 'an avatar hue reads ' + tok));
+    const dot = (css.match(/\.dot\s*\{([^}]*)\}/) || [])[1] || '';
+    const on = (css.match(/\.dot\.on\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/var\(--text-muted\)/.test(dot), 'away is muted');
+    ok(/var\(--ok\)/.test(on), 'online is --ok');
+    ok(!/--err/.test(dot) && !/--err/.test(on), 'and neither is red — Charles is red-green colourblind');
+    const el = W.document.documentElement;
+    ['--series-1', '--series-5', '--ok'].forEach(tok =>
+      ok(/^#[0-9a-f]{6}$/i.test(W.getComputedStyle(el).getPropertyValue(tok).trim()),
+         tok + ' did not resolve to a real colour'));
+  });
+
+  group('auto is the default, in all three places');
+  t('the markup carries it, for a browser with no script', () => {
+    ok(/<html[^>]*\sdata-theme="auto"/.test(APP_SRC), 'index.html');
+    ok(/<html[^>]*\sdata-theme="auto"/.test(PRIVACY_SRC), 'privacy.html');
+  });
+  t('the boot script falls back to it, for a retired or missing saved id', () => {
+    const boot = stripComments(APP_SRC).match(/valid\.indexOf\(t\) === -1\) t = '([a-z]+)'/);
+    ok(boot, 'the boot script no longer normalises an unknown id');
+    eq(boot[1], 'auto', 'nothing saved, or a retired id, must land on the default');
+  });
+  t('the picker pre-selects it, so the row never names another theme', () => {
+    ok(/<option value="auto" selected>/.test(APP_SRC), 'auto must carry `selected`');
+    eq((APP_SRC.match(/<option value="(?:auto|midnight|dark|light|sepia)" selected>/g) || []).length, 1,
+       'exactly one option may carry it');
+  });
+  t('slate is the ONE id that maps to a palette rather than to the default', () => {
+    ok(/t === 'slate'\) t = 'dark'/.test(stripComments(APP_SRC)),
+       'slate is Dark renamed — sending it to Auto would change what a reader sees');
+  });
+  t('the themes are listed alphabetically', () => {
+    const opts = (APP_SRC.match(/<option value="(auto|midnight|dark|light|sepia)"/g) || [])
+      .map(o => (o.match(/value="([^"]+)"/) || [])[1]);
+    eq(opts, ['auto', 'dark', 'light', 'midnight', 'sepia'],
+       'Auto is first because of the alphabet, not because it is the default');
+  });
+  t('and it resolves live, in whichever mode this browser is in', () => {
+    const el = W.document.documentElement, was = el.getAttribute('data-theme');
+    try {
+      const read = (th) => { el.setAttribute('data-theme', th);
+        const c = W.getComputedStyle(el);
+        return { bg: c.getPropertyValue('--bg').trim(), scheme: c.colorScheme.trim() }; };
+      const auto = read('auto');
+      const want = read(W.matchMedia('(prefers-color-scheme: dark)').matches ? 'midnight' : 'light');
+      eq(auto.bg, want.bg, 'the pack resolves Auto’s palette');
+      eq(auto.scheme, want.scheme, 'and color-scheme has to follow it');
+    } finally { el.setAttribute('data-theme', was || 'auto'); }
+  });
+  t('color-scheme comes from the PACK, and every theme resolves the right way round', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(!/color-scheme\s*:/.test(css), 'this page must not declare color-scheme — the pack owns it (rule 18)');
+    const el = W.document.documentElement, was = el.getAttribute('data-theme');
+    try {
+      const sch = (th) => { el.setAttribute('data-theme', th); return W.getComputedStyle(el).colorScheme.trim(); };
+      eq(sch('midnight'), 'dark', 'midnight is a dark palette');
+      eq(sch('dark'), 'dark');
+      eq(sch('light'), 'light');
+      eq(sch('sepia'), 'light', 'sepia is a warm LIGHT theme — the classic way to get this wrong');
+      eq(sch('auto'), W.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+         'Auto needs BOTH halves, and the pack emits them');
+    } finally { el.setAttribute('data-theme', was || 'auto'); }
+  });
+
+  group('the page is on the shared origin, and behaves like it');
+  t('the CSP names exactly the Firebase SDK and its three endpoints, and nothing else', () => {
+    /* League Night's line without accounts.google.com and without frame-src:
+       nothing on firebaseapp.com (the corporate filter blocks it, and anonymous
+       sign-in never needs it), and nothing from Google's sign-in until the last
+       milestone. A new endpoint fails HERE before it ships. */
+    const csp = (APP_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
+    ok(csp, 'there must be a CSP meta tag — Pages cannot send headers');
+    ok(/default-src 'none'/.test(csp), 'it starts at none');
+    eq((csp.match(/https?:\/\/[^\s;']+/g) || []).sort(),
+       ['https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com',
+        'https://securetoken.googleapis.com', 'https://www.gstatic.com'],
+       'the host list is pinned exactly');
+    ok(/script-src 'self' 'unsafe-inline' https:\/\/www\.gstatic\.com;/.test(csp), 'gstatic is the only script host');
+    ok(!/frame-src/.test(csp), 'no frames until Google sign-in arrives');
+    ok(!/firebaseapp\.com/.test(csp), 'and never the hostname the corporate filter blocks');
+  });
+  t('manifest-src and worker-src are spelled out, not left to fall back', () => {
+    const csp = (APP_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
+    ok(/manifest-src 'self'/.test(csp), "without it the manifest fetch is refused and Install silently stops being offered");
+    ok(/worker-src 'self'/.test(csp), 'or worker-src falls through child-src to script-src and inherits gstatic');
+  });
+  t('nothing is fetched from off-origin by markup', () => {
+    const body = stripComments(APP_SRC);
+    eq(body.match(/(?:src|href)="https?:\/\/(?!github\.com)[^"]*"/g) || [], [],
+       'the SDK comes by import() inside the module; everything else is vendored or absent');
+  });
+  t('everything rendered goes through esc()', () => {
+    eq(H.esc('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;', 'angle brackets');
+    eq(H.esc('a"b\'c&d'), 'a&quot;b&#39;c&amp;d', 'quotes and ampersand');
+  });
+  t('tests.html and privacy.html keep their own stricter policies', () => {
+    const mine = (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '';
+    ok(/frame-src 'self'/.test(mine), 'this page needs frame-src self for the harness frame');
+    eq(mine.match(/https?:\/\/[^\s;']+/g) || [], [], 'and names no external host at all');
+    const priv = (PRIVACY_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
+    eq(priv.match(/https?:\/\/[^\s;']+/g) || [], [], 'the policy page talks to nobody');
+  });
+
+  group('what this browser keeps cannot be mangled or lost');
+  t('the allowlist strips a field nobody declared', () => {
+    const out = H.normalizeLocal({ nick: 'x', secret: 'kept?', packs: [], recent: [] });
+    eq(Object.keys(out).sort(), ['code', 'nick', 'packs', 'recent', 'version'],
+       'a new stored field must be added to normalizeLocal AND bump SCHEMA');
+  });
+  t('a nickname is capped in code, not only by maxlength', () => {
+    eq(H.normalizeLocal({ nick: 'x'.repeat(500) }).nick.length, H.NICK_MAX, 'a paste ignores the attribute');
+    eq(H.normalizeLocal({ nick: '  Ada  ' }).nick, 'Ada', 'and trimmed');
+  });
+  t('a remembered room code is shape-checked, never kept loosely', () => {
+    eq(H.normalizeLocal({ code: 'abcdef' }).code, 'ABCDEF', 'upper-cased');
+    eq(H.normalizeLocal({ code: 'ABC-DEF' }).code, 'ABCDEF', 'dashes stripped');
+    eq(H.normalizeLocal({ code: 'ABCDE0' }).code, '', 'a 0 is not in the alphabet, so it is not a code');
+    eq(H.normalizeLocal({ code: '<script>' }).code, '', 'junk is nothing');
+  });
+  t('the recent list is capped, de-duplicated and shape-checked', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ code: 'ABCDE' + 'ABCDEFGHJ'[i], at: i }));
+    eq(H.normalizeLocal({ recent: many }).recent.length, H.RECENT_MAX, 'capped');
+    eq(H.normalizeLocal({ recent: [{ code: 'ABCDEF' }, { code: 'abcdef' }] }).recent.length, 1, 'one entry per code');
+    eq(H.normalizeLocal({ recent: [{ code: 'nope' }, 'junk', null] }).recent, [], 'nothing malformed survives');
+  });
+  t('custom packs are capped, and a question with a blank answer is dropped', () => {
+    const q = { q: 'Q?', a: ['a', 'b', 'c', 'd'], c: 2 };
+    const packs = Array.from({ length: 14 }, (_, i) => ({ name: 'P' + i, qs: [q] }));
+    eq(H.normalizeLocal({ packs: packs }).packs.length, H.PACKS_MAX, 'packs per browser');
+    const big = { name: 'x'.repeat(100), qs: Array.from({ length: 80 }, () => q) };
+    const p = H.normalizePack(big);
+    eq(p.name.length, 40, 'a pack name is capped');
+    eq(p.qs.length, H.PACK_QS_MAX, 'and so is its length — the rules refuse more');
+    eq(H.normalizePack({ name: 'p', qs: [{ q: 'Q', a: ['a', 'b', 'c'], c: 0 }] }).qs.length, 0,
+       'three answers is not a question — never padded with a blank nobody can read');
+    eq(H.normalizePack({ name: 'p', qs: [{ q: 'Q', a: ['a', 'b', '', 'd'], c: 0 }] }).qs.length, 0, 'nor is a blank one');
+    const long = H.normalizePack({ name: 'p', qs: [{ q: 'q'.repeat(300), a: ['a'.repeat(99), 'b', 'c', 'd'], c: 9 }] }).qs[0];
+    eq(long.q.length, H.Q_MAX, 'a question is sliced');
+    eq(long.a[0].length, H.A_MAX, 'an answer is sliced');
+    eq(long.c, 3, 'and the correct index is clamped');
+    eq(H.normalizePack(null), null, 'junk is nothing');
+    eq(H.normalizePack({ qs: 'nope' }), null, 'an empty pack is nothing too');
+  });
+  t('junk in, blank state out — never a throw', () => {
+    eq(H.normalizeLocal(null), H.blankLocal());
+    eq(H.normalizeLocal('nonsense'), H.blankLocal());
+    eq(H.normalizeLocal({ packs: 'not an array', recent: 7 }), H.blankLocal());
+  });
+  t('data from a NEWER build is refused at every entry point', () => {
+    const src = stripComments(APP_SRC);
+    ok(/function haltForNewerData/.test(src), 'the halt must exist');
+    ok(/Number\(peek\.version \|\| 1\) > SCHEMA/.test(src), 'localStorage is checked at boot');
+    ok(/Number\(raw\.version \|\| 1\) > SCHEMA/.test(src), 'and so is a restored backup');
+    ok(/Number\(incoming\.version \|\| 1\) > SCHEMA/.test(src), 'and another tab’s write');
+    ok(/throw new Error\('halted/.test(src), 'it must THROW — a half-booted app with handlers attached is one click from a save');
+    ok(/window\.brHalted = true/.test(src), 'and the flag the module and the worker block read is set');
+  });
+  t('todayISO builds from LOCAL parts, never toISOString', () => {
+    ok(/^\d{4}-\d{2}-\d{2}$/.test(H.todayISO()), 'shape');
+    ok(!/toISOString/.test(stripComments(APP_SRC)), 'toISOString converts to UTC and shifts every date back a day east of Greenwich');
+  });
+  t('a backup holds the nickname and the packs, and never a room', () => {
+    const p = H.backupPayload({ nick: 'Ada', code: 'ABCDEF', packs: [{ name: 'P', qs: [] }], recent: [{ code: 'ABCDEF', at: 1 }] });
+    eq(Object.keys(p).sort(), ['nick', 'packs', 'version'], 'a room is an evening’s thing and a backup is for keeps');
+  });
+
+  group('a room arriving from another browser is a hostile backup');
+  t('normalizeRoom strips unknown keys and rebuilds every field', () => {
+    const r = H.normalizeRoom(Object.assign(fixtureRoom(), { secret: 1, phase: 'bogus', kind: 'poker', rev: '7', scores: { [U.b]: '12' } }));
+    eq(Object.keys(r).sort(), ['createdAt', 'expiresAt', 'feed', 'game', 'host', 'kind', 'pack', 'phase', 'rev', 'schema', 'scores'],
+       'a new room field must be added to normalizeRoom, to validRoom in firestore.rules AND bump SCHEMA');
+    eq(r.phase, 'lobby', 'an unknown phase is the lobby');
+    eq(r.kind, null, 'an unknown game is no game');
+    eq(r.rev, 7, 'numbers are coerced');
+    eq(r.scores[U.b], 12, 'scores too');
+  });
+  t('a room whose host is not a uid is no room at all', () => {
+    eq(H.normalizeRoom(fixtureRoom({ host: '"><script>' })), null, 'a repaired host would be a player nobody is');
+    eq(H.normalizeRoom(null), null);
+    eq(H.normalizeRoom('junk'), null);
+  });
+  t('scores are keyed by uid shape and capped at the rules’ 32', () => {
+    const raw = {};
+    for (let i = 0; i < 40; i++) raw['U' + String(i).padStart(27, 'x')] = i;
+    raw['<bad>'] = 99;
+    const s = H.normalizeScores(raw);
+    eq(Object.keys(s).length, H.PLAYERS_MAX, 'capped');
+    ok(!('<bad>' in s), 'and a bad key is dropped');
+  });
+  t('the feed is capped and each entry is one of three kinds, text sliced', () => {
+    const feed = Array.from({ length: 30 }, (_, i) => ({ t: 'guess', uid: U.b, text: 'x'.repeat(100) }));
+    feed.push({ t: 'shout', uid: U.b, text: 'no' });
+    feed.push({ t: 'got', uid: 'bad uid', text: 'no' });
+    const f = H.normalizeFeed(feed);
+    eq(f.length, H.FEED_MAX, 'capped at 20');
+    eq(f[0].text.length, 40, 'text sliced to 40');
+    ok(f.every((e) => e.t === 'guess'), 'the unknown kind and the bad uid were dropped');
+  });
+  t('a Firestore Timestamp becomes milliseconds, whichever shape it arrives in', () => {
+    eq(H.toMs(12345), 12345, 'a number is a number');
+    eq(H.toMs({ toMillis: () => 777 }), 777, 'a Timestamp object');
+    eq(H.toMs({ seconds: 2, nanoseconds: 500000000 }), 2500, 'a plain seconds/nanos pair');
+    eq(H.toMs('soon'), 0, 'junk is 0, which reads as "never"');
+    eq(H.toMs(null), 0);
+    eq(H.normalizeRoom(fixtureRoom({ expiresAt: { toMillis: () => 99 } })).expiresAt, 99, 'and the room boundary accepts it');
+  });
+  t('a player list drops bad uids, caps nicknames, de-duplicates and sorts by arrival', () => {
+    const list = fixturePlayers().reverse();
+    list.push({ uid: U.b, nick: 'Ben again' });
+    list.push({ uid: 'nope!', nick: 'ghost' });
+    list.push({ uid: U.d, nick: 'x'.repeat(60), joinedAt: T0 - 1, seenAt: T0, ansR: '3', hue: 40 });
+    const p = H.normalizePlayers(list);
+    eq(p.map((x) => x.uid), [U.host, U.b, U.c, U.d], 'arrival order, one record per uid, no ghost');
+    eq(p[3].nick.length, H.NICK_MAX, 'a nickname is sliced');
+    eq(p[3].ansR, 3, 'ansR coerced');
+    eq(p[3].hue, 11, 'hue clamped to 0..11');
+    eq(Object.keys(p[0]).sort(), ['ansR', 'hue', 'joinedAt', 'nick', 'seenAt', 'uid'], 'and nothing else survives');
+    eq(H.normalizePlayers([{ uid: U.b, nick: '' }])[0].nick, 'Someone', 'an empty nickname reads as Someone rather than as nothing');
+  });
+  t('an answer is a short string, an int or up to three short strings', () => {
+    const a = H.normalizeAnswers([
+      { uid: U.b, r: 2, v: 3, at: T0 },
+      { uid: U.c, r: 2, v: 'x'.repeat(200), at: T0 },
+      { uid: U.d, r: 2, v: ['a'.repeat(99), 'b', 'c', 'd'], at: T0 },
+      { uid: U.host, r: 2, v: { evil: true }, at: T0 },
+      { uid: 'bad uid!', r: 2, v: 1, at: T0 },
+    ]);
+    eq(a.map((x) => x.uid), [U.b, U.c, U.d], 'an object value and a bad uid are dropped');
+    eq(a[1].v.length, 120, 'a string is sliced to 120');
+    eq(a[2].v.length, 3, 'a list to three');
+    eq(a[2].v[0].length, H.A_MAX, 'and each element to 60 — the rules cannot look inside a list, so this is the only cap');
+  });
+  t('every cap mirrors firestore.rules', () => {
+    /* Read off both files, so a change to one without the other fails here. */
+    const rules = stripComments(RULES_SRC);
+    const n = (re) => { const m = rules.match(re); ok(m, 'rules pattern not found: ' + re); return +m[1]; };
+    eq(n(/d\.scores\.size\(\) <= (\d+)/), H.PLAYERS_MAX, 'scores');
+    eq(n(/d\.feed\.size\(\) <= (\d+)/), H.FEED_MAX, 'feed');
+    eq(n(/d\.pack\.qs\.size\(\) <= (\d+)/), H.PACK_QS_MAX, 'pack');
+    eq(n(/d\.nick\.size\(\) <= (\d+)/), H.NICK_MAX, 'nick');
+    eq(n(/d\.v is string && d\.v\.size\(\) <= (\d+)/), 120, 'an answer string');
+    eq(n(/d\.v is list && d\.v\.size\(\) <= (\d+)/), 3, 'an answer list');
+    eq(n(/duration\.value\((\d+), 'h'\)/) * 3600000, H.ROOM_MAX_MS, 'the twelve-hour ceiling');
+    eq(n(/duration\.value\((\d+), 'm'\)/) * 60000, H.HOST_STALE_MS, 'the host staleness');
+    eq(n(/d\.hue >= 0 && d\.hue <= (\d+)/), 11, 'hue');
+  });
+  t('the rules file is the shape the family agreed', () => {
+    /* The rules file is commented with //, which stripComments does not know. */
+    const rules = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(/allow list:\s+if false;/.test(rules), 'rooms are never listable — the code is the capability');
+    ok(!/match \/\{document=\*\*\}/.test(rules), 'no catch-all');
+    ok(/request\.resource\.data\.rev == resource\.data\.rev \+ 1/.test(rules), 'every update raises rev by one');
+    ok(/d\.seenAt == request\.time/.test(rules) && /d\.at == request\.time/.test(rules),
+       'presence and answers prove a serverTimestamp() sentinel');
+    ok(/allow get, list:\s+if isHost\(\);/.test(rules), 'answers are host-read only');
+    /* Every get() guarded: each `get(` sits after an `exists(` of the same path
+       in the same function, or inside roomLive()'s guard. Cheap check: the two
+       helper paths are the only ones ever fetched. */
+    eq((rules.match(/get\(([a-zA-Z]+Path\([^)]*\))\)/g) || []).map((s) => s.replace(/get\(|\)$/g, '')).filter((p, i, a) => a.indexOf(p) === i).sort(),
+       ['playerPath(resource.data.host)', 'roomPath()'],
+       'only the room and the old host’s player document are ever fetched (the handoff target is an exists(), not a get())');
+    ok(/exists\(roomPath\(\)\) && room\(\)\.expiresAt/.test(rules), 'and the room read is guarded by exists()');
+    ok(/!exists\(playerPath\(resource\.data\.host\)\)\s*\|\|\s*get\(playerPath\(resource\.data\.host\)\)/.test(rules),
+       'the stale-host read too');
+  });
+
+  group('room codes');
+  t('a code is six characters from an alphabet with no 0/O or 1/I', () => {
+    eq(H.CODE_ALPHABET.length, 32, '32 symbols, so a random byte mod 32 is uniform');
+    ['0', 'O', '1', 'I'].forEach((ch) => ok(H.CODE_ALPHABET.indexOf(ch) === -1, ch + ' is not in the alphabet'));
+    eq(H.CODE_LEN, 6, 'six — Charles settled it on 2026-10-27');
+    for (let i = 0; i < 50; i++) ok(H.CODE_RE.test(H.randomCode()), 'every drawn code matches CODE_RE');
+    const seen = new Set();
+    for (let i = 0; i < 300; i++) seen.add(H.randomCode());
+    ok(seen.size > 295, 'and they do not repeat — ' + seen.size + ' distinct of 300');
+    ok(/crypto\.getRandomValues/.test(stripComments(APP_SRC)) && !/Math\.random/.test(stripComments(APP_SRC)),
+       'drawn from crypto, never Math.random');
+  });
+  t('cleanCode upper-cases and strips, and corrects nothing', () => {
+    eq(H.cleanCode(' ab-cd ef '), 'ABCDEF');
+    eq(H.cleanCode('abc0ef'), 'ABC0EF', 'a 0 is kept so CODE_RE can refuse it — never guessed into an O');
+    ok(!H.CODE_RE.test('ABC0EF'), 'and CODE_RE refuses it');
+    ok(!H.CODE_RE.test('ABCDE'), 'five is too short');
+    ok(!H.CODE_RE.test('ABCDEFG'), 'seven is too long');
+  });
+
+  group('presence and the handoff, pure');
+  t('a player is online for four minutes after their last write', () => {
+    eq(H.ONLINE_MS, 4 * 60000);
+    ok(H.isOnline({ seenAt: T0 - H.ONLINE_MS + 1 }, T0), 'just inside');
+    ok(!H.isOnline({ seenAt: T0 - H.ONLINE_MS }, T0), 'on the boundary is off');
+    ok(!H.isOnline({ seenAt: 0 }, T0), 'never seen is off');
+    ok(!H.isOnline(null, T0), 'and nobody is off');
+  });
+  t('nextHost is the ONLINE player who has been here longest, and null when nobody is', () => {
+    const list = fixturePlayers();
+    eq(H.nextHost(list, T0), U.host, 'the host, still online, keeps the room');
+    list[0].seenAt = T0 - 10 * 60000;
+    eq(H.nextHost(list, T0), U.b, 'the host away: the next-longest-present online player');
+    eq(H.nextHost(list, T0 + 60 * 60000), null, 'an hour later nobody is online');
+    eq(H.nextHost([], T0), null);
+    /* Arrival order, not list order — the one thing a shuffled snapshot must not change. */
+    eq(H.nextHost(list.slice().reverse(), T0), U.b, 'order of the list does not matter');
+  });
+  t('a host is stale after three minutes, before the roster calls them offline', () => {
+    ok(H.HOST_STALE_MS < H.ONLINE_MS, 'stale first, offline later — or the roster shows a host nobody can replace');
+    const list = fixturePlayers();
+    ok(!H.hostIsStale(list, U.host, T0), 'a host seen a second ago is not stale');
+    ok(H.hostIsStale(list, U.host, T0 + H.HOST_STALE_MS + 1000), 'three minutes on, they are');
+    ok(H.hostIsStale(list, U.d, T0), 'a host with no player record is stale too');
+  });
+
+  /* ── The render smoke test ──────────────────────────────────────────────── */
+  group('the app actually runs — every view drawn, every dialog opened');
+  t('nothing threw while the app was walked', () => {
+    const s = asyncResults.smoke;
+    ok(s, 'the smoke walk did not record a verdict at all');
+    eq(s.errs.length, 0, 'the frame threw during the walk', s.errs.join(' | '));
+  });
+  t('every view drew something', () => {
+    const s = asyncResults.smoke;
+    Object.keys(s.drawn).filter((k) => k.indexOf('view:') === 0).forEach((k) => {
+      ok(s.drawn[k] > 0, k + ' rendered no text — a render that threw half way leaves an element that is present and empty', s.drawn[k]);
+    });
+    ok(s.drawn['view:home'] > 0, 'the home card was walked');
+  });
+  t('every dialog opened, and had something in it', () => {
+    const s = asyncResults.smoke;
+    ok(s.dialogs >= 3, 'the app should carry the family windows', s.dialogs);
+    Object.keys(s.drawn).filter((k) => k.indexOf('dialog:') === 0).forEach((k) => {
+      ok(s.drawn[k] > 0, k + ' opened empty', s.drawn[k]);
+    });
+  });
+
+  group('the chrome is the family’s');
+  t('the footer carries all three of the family’s links', () => {
+    ok(/href="privacy\.html"/.test(APP_SRC), 'privacy policy');
+    ok(/>How it works</.test(APP_SRC), 'the repo, under that label and never "README"');
+    ok(/MIT licensed/.test(APP_SRC), 'the authorship line');
+  });
+  t('the footer is Sprint Predictability\u2019s, down to the flex row', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    const foot = (css.match(/(?:^|\})\s*footer\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/display:\s*flex/.test(foot), 'footer is the flex row');
+    ok(/\.footnotes\s*\{[^}]*flex:\s*1 1 320px/.test(css), 'with .footnotes holding the lines');
+    const priv = (css.match(/(?:^|\})\s*\.privacy\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/font-size:\s*var\(--fs-xs\)/.test(priv) && /color:\s*var\(--text-muted\)/.test(priv), 'the lines are xs and muted');
+    ok(/\.privacy-links a\s*\{[^}]*color:\s*var\(--text-muted\)/.test(css), 'and the links are muted, not accent');
+    const ps = [...W.document.querySelectorAll('footer .footnotes p')];
+    eq(ps.length, 3, 'three lines');
+    const lefts = [...new Set(ps.map((el) => Math.round(el.getBoundingClientRect().left)))];
+    eq(lefts.length, 1, 'stacked, not laid out side by side');
+  });
+  t('the authorship line points its two links the right way round', () => {
+    const by = {};
+    W.document.querySelectorAll('footer a[href]').forEach((a) => { by[a.textContent.trim()] = a.href; });
+    ok(/NOTICE$/.test(by['independent personal project'] || ''), '"independent personal project" must point at NOTICE');
+    ok(/LICENSE$/.test(by['MIT licensed'] || ''), '"MIT licensed" must point at LICENSE');
+    ok(/break-room$/.test(by['How it works'] || ''), 'the repo link is labelled "How it works" and points at THIS repo');
+    ok(by['Privacy policy'], 'and the policy is linked from the app page');
+  });
+  t('the privacy page has the footer too, minus its own link, and says what the cloud holds', () => {
+    ok(/>How it works</.test(PRIVACY_SRC), 'the repo link');
+    ok(/MIT licensed/.test(PRIVACY_SRC), 'the authorship line');
+    ok(!/href="privacy\.html"/.test(PRIVACY_SRC), 'you are standing on that page');
+    ok(/anonymously/.test(PRIVACY_SRC), 'it says the sign-in is anonymous');
+    ok(/within about a day/.test(PRIVACY_SRC), 'and that a room is deleted');
+    ok(/www\.gstatic\.com/.test(PRIVACY_SRC), 'and names the one third-party script');
+    ok(/break-room/.test(PRIVACY_SRC) && !/github\.com\/eagleadams86\/starter/.test(PRIVACY_SRC), 'its links are this repo’s');
+  });
+  t('</main> closes BEFORE <footer>, on both pages', () => {
+    [['index.html', APP_SRC], ['privacy.html', PRIVACY_SRC]].forEach((pair) => {
+      const body = stripComments(pair[1]);
+      const m = body.indexOf('</main>'), f = body.indexOf('<footer');
+      ok(m > -1 && f > -1, pair[0] + ': needs both landmarks');
+      ok(m < f, pair[0] + ': a <footer> nested inside main is not contentinfo at all');
+    });
+  });
+  t('the theme picker is the LAST control in the header row', () => {
+    const bar = (APP_SRC.match(/<div class="headctl">([\s\S]*?)<\/div>/) || [])[1] || '';
+    const ids = (bar.match(/id="(\w+)"/g) || []).map(s => s.replace(/id="|"/g, ''));
+    eq(ids[ids.length - 1], 'themeSel', 'it is the one control that changes nothing but how the page looks');
+    ok(ids.indexOf('inviteBtn') > -1 && ids.indexOf('dataBtn') > -1, 'Invite stands in the Share slot beside Back Up');
+  });
+  t('the header picker cannot claim the whole row, and the row is one scrolling line', () => {
+    eq(W.getComputedStyle(W.document.getElementById('themeSel')).width === '100%', false);
+    const bar = W.document.querySelector('.headbar');
+    ok(bar.getBoundingClientRect().height < 60, 'the header row must stay one line at 1000px');
+    const css = stripComments(APP_SRC);
+    ok(/\.headctl \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto;/.test(css), 'the controls are the scroller');
+    ok(/wireScrollRow\(document\.querySelector\('\.headctl'\)/.test(css), 'with the family’s arrows wired');
+    ok(/@media \(hover: none\), \(pointer: coarse\) \{ \.rownav \{ display: none !important; \} \}/.test(css),
+       'and the arrows are for a mouse or trackpad only');
+    ok(/html \{ scroll-padding-top: calc\(var\(--head-h, 0px\) \+ 8px\); \}/.test(css),
+       'a keyboard focus never lands under the pinned header');
+    ok(!/scroll-margin-top/.test(css), 'and no per-control scroll-margin-top as well');
+    const nav = W.document.querySelector('.headrow > .rownav');
+    ok(nav && nav.hidden, 'at 1000px nothing is off an end, so the arrows are hidden');
+  });
+  t('every dialog announces itself, opens through openModal and closes on a click outside', () => {
+    const src = stripComments(APP_SRC);
+    const ids = (APP_SRC.match(/<dialog id="(\w+)"/g) || []).map(s => s.replace(/<dialog id="|"/g, ''));
+    ok(ids.length >= 3, 'expected the family’s dialogs, got ' + ids.join(', '));
+    ids.forEach((id) => {
+      ok(new RegExp('<dialog id="' + id + '"[^>]*aria-labelledby=').test(APP_SRC), id + ' must name its own heading');
+      ok(new RegExp("'" + id + "'").test(src), id + ' is not registered for backdrop dismissal');
+    });
+    ok(/function openModal/.test(src), 'and every modal opens through openModal()');
+    ok(!/\.showModal\(\)/.test(src.replace(/function openModal[\s\S]*?\n\}/, '')),
+       'nothing may call showModal() directly — that is what decides whose keyboard opens');
+  });
+  t('a dialog heading is h2 at --fs-md, as in every sibling', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(/dialog h2\s*\{[^}]*font-size:\s*var\(--fs-md\)/.test(css));
+    ok(/<h2 id="\w+Title"/.test(APP_SRC), 'dialogs are titled with an h2');
+  });
+  t('"Forget This Browser" is folded into the Back Up dialog, behind a disclosure', () => {
+    ok(/<details class="danger-zone">/.test(APP_SRC),
+       'a destructive action needs the backup button beside it, and a confirm() cannot hold one');
+    const data = (APP_SRC.match(/<dialog id="dataDialog"[\s\S]*?<\/dialog>/) || [''])[0];
+    ok(/danger-zone/.test(data), 'and it lives in the Back Up dialog, not the header');
+    ok(!/id="clearBtn"[^>]*>/.test(APP_SRC.replace(data, '')), 'there is only one Delete All');
+  });
+  t('the toast is a popover, and cannot land in the corner', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    const toast = (css.match(/#toast\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/right:\s*auto/.test(toast) && /top:\s*auto/.test(toast), 'without these the UA’s inset:0 wins and the toast sits top-left');
+    ok(/popover="manual"/.test(APP_SRC), 'and it must be a popover to be seen over a modal dialog');
+    ok(/border-radius:\s*var\(--radius-pill\)/.test(toast), 'the family’s pill shape');
+  });
+  t('a delete-all is confirmed in the family’s window, which offers the backup first', () => {
+    const src = stripComments(APP_SRC);
+    ok(/<dialog id="clearDialog"/.test(src), 'Delete All confirms in its own dialog');
+    ok(/id="clearBackupBtn"[^>]*class="safety"/.test(src), 'and offers the backup that is the only way back');
+    ok(/There is no undo — a downloaded backup is the only way/.test(src), 'and says so in the family\'s words');
+    ok(/deletes your nickname/.test(src), 'and names what goes');
+    ok(/'Restore ' \+ n/.test(src), 'and a restore says what the file holds before replacing anything');
+  });
+  t('a per-row action is an .icon-btn square, neutral until hovered', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(/button\.icon-btn\.danger\s*\{[^}]*color:\s*var\(--text-muted\)/.test(css), 'a column of red squares reads as a column of warnings');
+    ok(/button\.icon-btn\.danger:hover\s*\{[^}]*var\(--err\)/.test(css), 'red on hover');
+    ok(/\.icon-btn\s*\{[^}]*width:\s*var\(--chrome-h\)/.test(css), '--chrome-h square');
+  });
+  t('a control’s border is --border-control, never --border', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    const btn = (css.match(/(?:^|\})\s*button\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/border:\s*1px solid var\(--border-control\)/.test(btn), 'WCAG 1.4.11 asks 3:1 of what identifies a component, and here that is the border');
+    const field = (css.match(/input\[type="password"\][^{]*\{([^}]*)\}/) || [])[1] || '';
+    ok(/var\(--input-border\)/.test(field), 'a field is a control too');
+  });
+  t('the field type list is the pack’s own', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ['text', 'number', 'date', 'month', 'search', 'tel', 'url', 'email', 'password']
+      .forEach(ty => ok(css.indexOf('input[type="' + ty + '"]') > -1, ty + ' is missing — a field left off arrives silently unstyled'));
+  });
+  t('an installed iPhone: nothing sits under the notch', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(/header \{[^}]*padding-top: calc\(10px \+ env\(safe-area-inset-top\)\)/.test(css), 'the header clears the status bar');
+    ok(/body::before \{[^}]*position: fixed;[^}]*height: env\(safe-area-inset-top\)/.test(css), 'a pinned band keeps scrolled content out from under the clock');
+    ok(/dialog \{ max-height: calc\(100vh[^}]*max\(env\(safe-area-inset-top\), env\(safe-area-inset-bottom\)\)/.test(css), 'and a tall window stops short of it');
+  });
+  t('the footer sits in the same column as a card’s text, both sides', () => {
+    ok(/\.privacy \{[^}]*padding: 0 19px;/.test(stripComments(APP_SRC)), 'padding on the left AND the right');
+  });
+  t('raisesKeyboard is a whitelist, so a new field type is never swept in', () => {
+    ok(H.raisesKeyboard({ tagName: 'INPUT', type: 'text' }));
+    ok(H.raisesKeyboard({ tagName: 'TEXTAREA' }));
+    ok(!H.raisesKeyboard({ tagName: 'INPUT', type: 'checkbox' }), 'a checkbox raises nothing');
+    ok(!H.raisesKeyboard({ tagName: 'INPUT', type: 'date' }), 'a date opens a picker, not a keyboard');
+    ok(!H.raisesKeyboard({ tagName: 'BUTTON' }));
+  });
+  t('a dropdown or picker opens on focus, so a window never opens on one', () => {
+    ok(H.opensOnFocus({ tagName: 'SELECT' }), 'a select');
+    ok(H.opensOnFocus({ tagName: 'INPUT', type: 'time' }), 'a time picker');
+    ok(H.opensOnFocus({ tagName: 'INPUT', type: 'text' }), 'and everything that raises the keyboard');
+    ok(!H.opensOnFocus({ tagName: 'INPUT', type: 'checkbox' }), 'a checkbox opens nothing');
+    ok(!H.opensOnFocus({ tagName: 'BUTTON' }), 'nor a button');
+    ok(!H.opensOnFocus(null), 'nor nothing focused');
+  });
+  t('[hidden] beats a class that sets display', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important/.test(css));
+  });
+  t('a scroll box carries position: relative, for iOS', () => {
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    const rule = (css.match(/\.table-scroll\s*\{([^}]*)\}/) || [])[1] || '';
+    ok(/overflow-x:\s*auto/.test(rule) && /position:\s*relative/.test(rule), 'without relative, iOS counts its full width in the document’s scroll area');
+  });
+  t('there is a skip link, and it goes to a real <main> with no role written onto it', () => {
+    ok(/<a class="skip" href="#main">/.test(APP_SRC));
+    const main = W.document.getElementById('main');
+    ok(main && main.tagName === 'MAIN', 'the skip link\u2019s target is a real <main>');
+    ok(!main.hasAttribute('role'), 'putting a role ON an element IS its role');
+    ok(main.contains(W.document.getElementById('homeCard')) && main.contains(W.document.getElementById('roomView')),
+       'both screens live inside the landmark');
+  });
+  t('the page is one of the family\u2019s TWO widths', () => {
+    const w = W.getComputedStyle(W.document.documentElement).getPropertyValue('--page-w').trim();
+    ok(w === '1500px' || w === '2400px', 'got ' + w);
+    const wrap = W.getComputedStyle(W.document.querySelector('.wrap')).maxWidth;
+    const bar = W.getComputedStyle(W.document.querySelector('.headbar')).maxWidth;
+    eq(wrap, bar, 'the content and the header row must share one width');
+    eq(wrap, w, 'and it must be the token, not a repeated literal');
+  });
+  t('every tick box is one size a flex row cannot squeeze (2026-10-27), by rule', () => {
+    /* No tick box is on the page yet; the rule is pinned in the source so the
+       first one arrives already sized. When one exists, measure it too. */
+    const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    ok(/input:is\(\[type="checkbox"\], \[type="radio"\]\) \{ flex: none; width: 1\.25rem; height: 1\.25rem;/.test(css),
+       'the family rule, last in the sheet');
+    const boxes = [...W.document.querySelectorAll('input[type="checkbox"], input[type="radio"]')];
+    const bad = boxes.filter((i) => { const cs = W.getComputedStyle(i);
+      return cs.flexShrink !== '0' || cs.width !== '20px' || cs.height !== '20px'; });
+    eq(bad.map((i) => i.id || i.name || i.value), [], 'every one on the page is 20px, and none can shrink');
+  });
+  t('a number box never steps on its own — the guard and the wheel listener are in place', () => {
+    const src = stripComments(APP_SRC);
+    const fn = (src.match(/addEventListener\('focusin', \(e\) => \{[\s\S]*?\n\}\);/) || [''])[0];
+    const guard = fn.indexOf("=== 'number') return;");
+    const cancel = fn.indexOf("addEventListener('mouseup'");
+    ok(guard > -1 && cancel > -1 && guard < cancel, 'number boxes skip the mouseup cancel', guard + ' vs ' + cancel);
+    ok(/pressedOn = e\.target/.test(src) && /pressedOn = null/.test(src), 'and the press is remembered per element, not as a bare flag');
+    ok(/addEventListener\('wheel'/.test(src) && /el\.blur\(\)/.test(src), 'and a wheel over a focused number box takes the focus away');
+  });
+  t('a click straight into a text box still selects it, so typing replaces', () => {
+    const D = W.document;
+    const box = D.getElementById('nickBox');
+    if (D.activeElement === box) box.blur();
+    box.value = 'Ada';
+    box.dispatchEvent(new W.PointerEvent('pointerdown', { bubbles: true }));
+    box.focus();
+    box.dispatchEvent(new W.PointerEvent('pointerup', { bubbles: true }));
+    const up = new W.MouseEvent('mouseup', { bubbles: true, cancelable: true });
+    box.dispatchEvent(up);
+    eq(up.defaultPrevented, true, 'the release that would collapse the selection is held back');
+    eq([box.selectionStart, box.selectionEnd], [0, box.value.length], 'and the whole value is selected');
+    box.blur();
+  });
+
+  group('the home card');
+  t('it is ONE measure and ONE colour, the family’s welcome', () => {
+    const card = W.document.querySelector('#homeCard .empty');
+    ok(card, 'the home card must exist');
+    const ps = [...card.querySelectorAll('p')].filter((el) => el.getClientRects().length);
+    ok(ps.length >= 3, 'the lede, the privacy line and the no-cloud note');
+    const widths = [...new Set(ps.map((el) => Math.round(el.getBoundingClientRect().width)))];
+    eq(widths.length, 1, 'every paragraph shares one measure');
+    const colours = [...new Set(ps.map((el) => W.getComputedStyle(el).color))];
+    eq(colours.length, 1, 'and one colour');
+    const h = card.querySelector('h2');
+    ok(W.getComputedStyle(h).color !== colours[0], 'and the heading is the only line in a different colour');
+  });
+  t('with no cloud behind the page, every door says so rather than doing nothing', () => {
+    const D = W.document;
+    ok(!D.getElementById('noCloud').hidden, 'the note is up in the harness, where the cloud is off');
+    ok(D.getElementById('createBtn').disabled && D.getElementById('joinBtn').disabled, 'and both doors are disabled');
+  });
+  t('a nickname is required, trimmed and remembered; a code is checked before anything is tried', () => {
+    /* save() is stubbed for the press: this suite never writes the reader's storage. */
+    const D = W.document, realSave = W.save;
+    W.save = () => {};
+    try {
+    const warn = D.getElementById('homeWarn');
+    D.getElementById('nickBox').value = '   ';
+    eq(W.readNick(), null, 'blank is refused');
+    ok(/nickname/i.test(warn.textContent), 'and the message names the field');
+    D.getElementById('nickBox').value = '  Grace  ';
+    eq(W.readNick(), 'Grace', 'trimmed');
+    eq(H.__local().nick, 'Grace', 'and remembered in memory (save() is stubbed, so nothing reaches storage)');
+    D.getElementById('joinCode').value = 'abc def';
+    eq(W.readCode(), 'ABCDEF', 'a code is cleaned');
+    D.getElementById('joinCode').value = 'ABCDE0';
+    eq(W.readCode(), null, 'and a non-code is refused');
+    ok(/no O, 0, I or 1/.test(warn.textContent), 'with the alphabet explained');
+    } finally {
+      W.save = realSave;
+      H.__plantLocal(FIXTURE_LOCAL);
+      D.getElementById('nickBox').value = '';
+      D.getElementById('joinCode').value = '';
+    }
+  });
+
+  group('installable, and it works offline');
+  t('the manifest is valid, and its scope is relative', () => {
+    const m = JSON.parse(MANIFEST_SRC);
+    eq(m.scope, './', 'an absolute scope would capture every sibling app on this one origin');
+    eq(m.start_url, './');
+    eq(m.display, 'standalone');
+    eq(m.id, '/break-room/', 'the id is this app’s path');
+    eq(m.name, 'Break Room');
+    ok(/<link rel="manifest" href="manifest\.webmanifest">/.test(APP_SRC), 'and the page must link it');
+    eq(m.icons.map(i => i.purpose).sort(), ['any', 'any', 'maskable'], 'a rounded pair for what nothing masks, and a full-bleed one for what does');
+  });
+  t('the manifest is NOT linked from the privacy page', () => {
+    ok(!/rel="manifest"/.test(PRIVACY_SRC), 'a policy page is not a surface anyone installs from');
+  });
+  t('the worker is network-first, and caches only public files', () => {
+    ok(/networkFirst/.test(SW_SRC), 'stale cached code reading moved data is the failure to avoid');
+    const swCode = stripComments(SW_SRC);
+    ok(/fetch\(req, \{ cache: 'no-cache' \}\)/.test(swCode) && !/fetch\(req\)/.test(swCode),
+       'the serving fetch must opt out of the HTTP cache, or network-first is a name only');
+    ok(!/eval\(|importScripts|import\(/.test(SW_SRC), 'the page’s CSP does not apply here — this code runs with none at all');
+    eq(SW_SRC.match(/https?:\/\/[^\s'"]+/g) || [], [], 'and never fetches cross-origin');
+  });
+  t('the SHELL list is pinned here, which is the security review', () => {
+    const arr = (SW_SRC.match(/const SHELL = \[([\s\S]*?)\]/) || [])[1] || '';
+    const files = (arr.match(/'([^']+)'/g) || []).map(s => s.replace(/'/g, ''));
+    eq(files, ['./', 'theme.css', 'privacy.html', 'favicon.ico', 'manifest.webmanifest',
+               'icon-192.png', 'icon-512.png', 'icon-512-maskable.png'],
+       'adding a file to the offline cache is a decision, so it fails here first');
+  });
+  t('activate deletes only THIS app’s caches', () => {
+    ok(/k\.startsWith\(PREFIX\)/.test(SW_SRC), 'cache storage is origin-wide — a sibling’s cache is not ours to delete');
+    ok(/const PREFIX = 'break-room-shell-'/.test(SW_SRC), 'and the prefix is this app’s');
+    ok(!/starter-shell/.test(SW_SRC) && !/starter-shell/.test(KILL_SRC) && !/starter-/.test(stripComments(APP_SRC).replace(/<!--[\s\S]*?-->/g, '')),
+       'no starter- key or prefix survives anywhere — two apps sharing one overwrite each other');
+  });
+  t('registration is guarded three ways', () => {
+    const reg = (APP_SRC.match(/serviceWorker' in navigator[\s\S]*?\}\)\(\);/) || [''])[0];
+    ok(/window\.top !== window\.self/.test(reg), 'not in a frame, or a test run installs a worker');
+    ok(/window\.brHalted/.test(reg), 'not after a halt');
+    ok(/addEventListener\('load'/.test(reg), 'and after load, not competing with first paint');
+  });
+  t('the kill switch exists BEFORE it is needed', () => {
+    ok(/registration\.unregister/.test(KILL_SRC), 'it must unregister');
+    ok(/break-room-shell-/.test(KILL_SRC), 'clear this app’s caches only');
+    ok(/clients\.matchAll/.test(KILL_SRC), 'and reload the windows it was serving');
+  });
+
+  group('nothing below the header is painted before the first render');
+  t('the gate goes on before first paint and off with the first render', () => {
+    const src = stripComments(APP_SRC);
+    ok(/document\.documentElement\.dataset\.booting = 'on';/.test(src), 'the head script sets it');
+    const setAt = src.indexOf("dataset.booting = 'on'");
+    const themeAt = src.indexOf("localStorage.getItem('break-room-theme')");
+    ok(setAt > -1 && themeAt > -1 && setAt < themeAt, 'and sets it before the theme read, which can throw', setAt + ' vs ' + themeAt);
+    ok(/DOMContentLoaded', function \(\) \{\s*document\.documentElement\.removeAttribute\('data-booting'\);/.test(src),
+       'with a DOMContentLoaded backstop, so a script that dies on the way to the release can never leave the page blank');
+    ok(/render\(\);\s*document\.documentElement\.removeAttribute\('data-booting'\);/.test(src),
+       'and the release sits with the first render, in the SAME task — a frame later and the reveal is itself the flash');
+  });
+  t('the rule holds the paint, not the layout', () => {
+    const src = stripComments(APP_SRC);
+    const m = src.match(/html\[data-booting\][\s\S]{0,120}?\{[^}]*\}/);
+    ok(m, 'the rule is declared');
+    ['main', 'footer'].forEach((sel) => ok(m[0].indexOf(sel) > -1, 'it covers ' + sel, m[0]));
+    ok(/visibility: hidden/.test(m[0]), 'with visibility');
+    ok(!/display: *none/.test(m[0]), 'NEVER display:none — render() runs while the gate is on and has to measure a real layout');
+  });
+  t('a loaded page never holds the gate, and the header is outside it', async () => {
+    const f = document.createElement('iframe');
+    f.setAttribute('data-br-tests', '');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:absolute;left:-9999px;width:1280px;height:900px;border:0';
+    await new Promise((resolve) => {
+      f.onload = resolve;
+      f.src = 'index.html?booting=' + Date.now();
+      document.body.appendChild(f);
+    });
+    try {
+      const FW = f.contentWindow, D = FW.document;
+      eq(D.documentElement.getAttribute('data-booting'), null, 'a loaded page is never left holding the gate');
+      const main = D.querySelector('main');
+      const opened = Math.round(main.getBoundingClientRect().width);
+      ok(opened > 200, 'sanity: the frame laid out at all', String(opened));
+      D.documentElement.dataset.booting = 'on';
+      try {
+        eq(FW.getComputedStyle(main).visibility, 'hidden', 'the gate hides <main>');
+        eq(FW.getComputedStyle(D.querySelector('footer')).visibility, 'hidden', 'and the footer with it — that is the line that was flashing');
+        eq(Math.round(main.getBoundingClientRect().width), opened, 'while the box render() measures is UNCHANGED — display:none would hand it a zero');
+        eq(FW.getComputedStyle(D.querySelector('header')).visibility, 'visible', 'the header is static markup and paints immediately, so it stays outside the gate');
+      } finally { D.documentElement.removeAttribute('data-booting'); }
+    } finally { f.remove(); }
+  });
+
+  group('the info dot and the help window');
+  t('the dot is the family circle, declared property by property', () => {
+    ok(/\.tile-help \{[^}]*width: 16px; height: 16px; min-height: 0;/.test(APP_SRC), '16px, and opted out of any button floor');
+    ok(/\.tile-help \{[^}]*border-radius: 50%;/.test(APP_SRC) && /\.tile-help \{[^}]*background: transparent;/.test(APP_SRC), 'an outlined circle, not a filled pill');
+    ok(/\.tile-help \{[^}]*margin-left: 7px;/.test(APP_SRC), 'off the word it follows');
+    ok(/\.tile-help::after \{ content: ''; position: absolute; inset: -5px; \}/.test(APP_SRC), 'a true 24px tap target');
+    ok(/\.tile-help:hover \{ background: var\(--surface-alt\); border-color: var\(--text-secondary\);/.test(APP_SRC), 'and the hover fills rather than borrowing --focus-border');
+  });
+  t('every dot draws an "i", never a "?"', () => {
+    const bare = stripComments(APP_SRC);
+    const dots = bare.match(/<button[^>]*class="tile-help"[\s\S]*?<\/button>/g) || [];
+    ok(dots.length >= 1, 'the dot is still there');
+    eq(dots.filter((d) => !/>i<\/button>/.test(d)).join(' | '), '', '"?" asks where this answers');
+    eq(dots.filter((d) => !/aria-label="/.test(d)).join(' | '), '', 'and each says what it explains');
+  });
+  t('the window is sized by its text, and everything else is declared', () => {
+    ok(/#helpDialog \{ width: fit-content; max-width: calc\(100% - 32px\); padding: 20px; \}/.test(APP_SRC), 'sized by what is in it');
+    ok(/#helpTitle \{ margin: 0 0 12px; font-size: var\(--fs-md\); font-weight: 600;\s*color: var\(--text-primary\); \}/.test(APP_SRC), 'the heading is pinned');
+    ok(/#helpBody \{ max-width: 66ch; font-size: var\(--fs-sm\); line-height: 1\.55;\s*color: var\(--text-secondary\); \}/.test(APP_SRC), 'the 66-character measure');
+    ok(/#helpBody p, #helpBody li \{ font-size: inherit; line-height: inherit;\s*color: inherit; margin: 0 0 10px; \}/.test(APP_SRC), 'paragraphs follow the box');
+    ok(/#helpBody strong \{ color: var\(--text-primary\); \}/.test(APP_SRC), 'and bold is lifted');
+    ok(/id="helpCloseBtn">Got It</.test(APP_SRC), '"Got It", as in every other app');
+  });
+  t('one window, filled from a table by key — not a dialog per button', () => {
+    const src = stripComments(APP_SRC);
+    ok(/const HELP = \{/.test(src), 'the table exists');
+    ok(/closest\('\.tile-help'\)/.test(src), 'one delegated listener, so a dot added by a later render needs no wiring');
+    const used = [...new Set([...src.matchAll(/data-help="(\w+)"/g)].map((m) => m[1]))];
+    const keys = [...(src.match(/const HELP = \{[\s\S]*?\n\};/) || [''])[0].matchAll(/^  (\w+): \[/gm)].map((m) => m[1]);
+    ok(used.length >= 1, 'a dot was found — ' + used.join(', '));
+    eq(used.filter((k) => !keys.includes(k)).join(', '), '', 'a dot with no entry opens an empty window');
+    eq(keys.filter((k) => !used.includes(k)).join(', '), '', 'and an entry no dot points at is a second copy waiting to drift');
+  });
+  t('every dialog closes on a click off it', () => {
+    const dialogs = [...W.document.querySelectorAll('dialog')];
+    ok(dialogs.length >= 3, 'the dialogs were found — ' + dialogs.length);
+    const stuck = [];
+    for (const d of dialogs) {
+      if (d.open) d.close();
+      d.showModal();
+      for (const type of ['pointerdown', 'mousedown', 'click']) {
+        const E = type === 'pointerdown' ? W.PointerEvent : W.MouseEvent;
+        d.dispatchEvent(new E(type, { clientX: -1000, clientY: -1000, bubbles: true, cancelable: true }));
+      }
+      const closed = !d.open;
+      d.close();
+      if (!closed) stuck.push(d.id);
+    }
+    eq(stuck.join(', '), '', 'a dialog you cannot dismiss by clicking off it');
+  });
+  t('a note is paragraphs, and it bolds the claim it turns on', () => {
+    const src = stripComments(APP_SRC);
+    const at = src.indexOf('const HELP = {');
+    const table = src.slice(at, src.indexOf('\n};', at));
+    const entries = table.split(/\n  (?=\w+: \[)/).slice(1);
+    ok(entries.length >= 1, 'the table was found — ' + entries.length + ' entries');
+    for (const e of entries) {
+      const key = e.split(':')[0].trim();
+      const paras = (e.match(/<p>/g) || []).length;
+      const bolds = (e.match(/<strong>/g) || []).length;
+      const text = visibleText(e).replace(/\s+/g, ' ').length;
+      ok(paras >= 2 || text <= 380, key + ' is over 380 characters in one paragraph');
+      ok(bolds >= 1, key + ' bolds nothing — the reader has no way in');
+      const boldText = visibleText((e.match(/<strong>([\s\S]*?)<\/strong>/g) || []).join('')).replace(/\s+/g, ' ').length;
+      ok(boldText / text < 0.4, key + ' — bold must be a minority of the note');
+    }
+  });
+  t('nothing a reader typed can reach the help window', () => {
+    const src = stripComments(APP_SRC);
+    const at = src.indexOf('const HELP = {');
+    const table = src.slice(at, src.indexOf('\n};', at));
+    ok(at > 0 && !/\besc\(|\broom\.\w|\bplayers\[|\blocal\.\w|\$\(/.test(table), 'the table reads nothing from the data — every body is a literal');
+  });
+  /* M1-TESTS-SLOT */
+  /* M2-TESTS-SLOT */
+}
+
+/* ── EVERY TEST IS AWAITED (2026-09-14) ─────────────────────────────────────
+   This loop used to call `item.fn()` and move on. A plain test either throws or
+   doesn't, so that was fine for them — but an `async` test returns a promise
+   the moment it reaches its first `await`, the loop saw no throw and wrote ✓,
+   and the assertions after the `await` ran later against a row already marked
+   green. Their failures went nowhere at all: a rejected promise nobody holds.
+   The gate test "a loaded page never holds the gate…" was written that way and
+   could never fail. Now the loop awaits whatever a test returns — `await` on a
+   plain function's `undefined` costs nothing — so an async test is as honest as
+   a plain one and can be written in the ordinary way.
+   Raced against a timeout, because an awaited test that never settles (a frame
+   whose `load` never comes) would otherwise leave the page on "Loading…" for
+   ever, which CI reads as a hang rather than a named failure. */
+const TEST_TIMEOUT_MS = 20000;
+async function run() {
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+  for (const item of TESTS) {
+    if (item.group) {
+      const tr = document.createElement('tr');
+      tr.className = 'group';
+      const td = document.createElement('td');
+      td.colSpan = 3; td.textContent = item.group;
+      tr.appendChild(td); out.appendChild(tr);
+      continue;
+    }
+    let err = null, timer = null;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => item.fn()),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('the test never finished — gave up after '
+            + TEST_TIMEOUT_MS / 1000 + 's')), TEST_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (e) { err = e; } finally { clearTimeout(timer); }
+    const tr = document.createElement('tr');
+    tr.className = err ? 'fail' : 'pass';
+    const st = document.createElement('td');
+    st.className = 'st'; st.textContent = err ? '✕' : '✓';
+    const name = document.createElement('td'); name.textContent = item.name;
+    const msg = document.createElement('td');
+    msg.className = 'msg'; msg.textContent = err ? err.message : '';
+    tr.appendChild(st); tr.appendChild(name); tr.appendChild(msg);
+    out.appendChild(tr);
+    if (err) fail++; else pass++;
+  }
+  /* The floor — see EXPECTED at the top. Written as a row of its own so it reads
+     like any other failure, and counted into `fail` so CI's "All N tests pass"
+     check cannot match. */
+  if (pass + fail < EXPECTED) {
+    const tr = document.createElement('tr');
+    tr.className = 'fail';
+    const st = document.createElement('td'); st.className = 'st'; st.textContent = '✕';
+    const name = document.createElement('td');
+    name.textContent = 'the suite ran only ' + (pass + fail) + ' of at least ' + EXPECTED + ' tests';
+    const msg = document.createElement('td'); msg.className = 'msg';
+    msg.textContent = 'tests have gone missing rather than failed, so a green result here would '
+      + 'cover a fraction of the suite. If they were retired on purpose, lower EXPECTED to match.';
+    tr.appendChild(st); tr.appendChild(name); tr.appendChild(msg);
+    out.appendChild(tr);
+    fail++;
+  }
+  const s = document.getElementById('summary');
+  s.textContent = fail === 0 ? 'All ' + pass + ' tests pass' : fail + ' of ' + (pass + fail) + ' tests FAILED';
+  s.className = fail === 0 ? 'ok' : 'bad';
+  document.title = (fail === 0 ? '✓ ' : '✕ ') + document.title;
+}
+
+main().catch((e) => {
+  const s = document.getElementById('summary');
+  s.className = 'bad';
+  s.textContent = 'The suite could not start: ' + e.message;
+});
+</script>
+</body>
+</html>

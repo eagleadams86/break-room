@@ -1,0 +1,239 @@
+rules_version = '2';
+
+// Security rules for Break Room's Firestore database.
+//
+// This file is a checked-in copy of what should be deployed in the Firebase
+// console (Firestore Database → Rules). Nothing in this repo deploys it — there
+// is no Firebase CLI setup here and the app is a single static page — so if the
+// rules are ever changed in the console, update this file to match. (Same
+// pattern as league-night, golf-handicap, paptrack and financial-plan.)
+//
+// PASTE THESE INTO THE CONSOLE BEFORE THE FIRST ROOM IS OPENED. Firestore's
+// default rules for a new project either deny everything (every door on the
+// home card fails) or, in test mode, allow every signed-in user to read and
+// write everything.
+//
+// THE MODEL, IN ONE PARAGRAPH. Everyone signs in ANONYMOUSLY — no Google
+// account, no email, nothing that identifies a person across nights — so
+// `signedIn()` is FREE and never sufficient on its own. Knowing a room's
+// six-character code is the READ capability: any signed-in client may `get`
+// a room by its code while the room is unexpired, and NOBODY can `list` the
+// collection, which is what makes an unguessable code a key rather than a
+// hint. The HOST is a field on the room document and the host's browser is
+// the only writer of that document: every update must raise `rev` by exactly
+// one, which makes "every write is a transaction" a fact the server checks.
+// PLAYERS write only their own documents — a presence record and an answer —
+// and the server checks that each carries a `serverTimestamp()` sentinel, so
+// a clock a client made up never reaches another player's screen.
+//
+// A DELIBERATE DIVERGENCE FROM LEAGUE NIGHT, whose README says "Anonymous must
+// stay off". There, any signed-in account could read any league by id, so an
+// account had to cost something. Here a room is MEANT to be readable by
+// anyone holding its code, nothing in it outlives the night, and a colleague
+// on a corporate laptop must never need a Google account. What bounds the
+// public config instead: every cap below, the twelve-hour `expiresAt`
+// ceiling, the TTL policies that delete every collection, a budget alert on
+// the project, the browser API key restricted by HTTP referrer (a speed bump,
+// not a boundary), and the one-click kill switch of turning the Anonymous
+// provider off in the console. README says all of this in the same words.
+//
+// EVERY get() IS GUARDED BY exists(). An unguarded get() on a missing document
+// is an evaluation ERROR, not `false`; an `||` chain forgives that error only
+// when its other side is true, so the outcome would depend on evaluation order
+// and every test in the Rules Playground would show an error. Repeated get()
+// of the same document inside one evaluation is cached and counts once; the
+// worst case below (a handoff) makes three of the ten access calls a request
+// may make.
+//
+// Rules do NOT cascade to subcollections: a match on /rooms/{code} says nothing
+// about /rooms/{code}/players. Each block below is needed.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }   // FREE under anonymous auth
+    function me()       { return request.auth.uid; }
+
+    match /rooms/{code} {
+      function roomPath()    { return /databases/$(database)/documents/rooms/$(code); }
+      function playerPath(u) { return /databases/$(database)/documents/rooms/$(code)/players/$(u); }
+      function room()        { return get(roomPath()).data; }
+      // "Unexpired" is checked on EVERY read and write, by the server's clock.
+      // The client refuses an expired room long before the TTL policy deletes
+      // it (within about 24 hours), and this is what makes that refusal a fact
+      // rather than a courtesy: a client that lies about its clock still
+      // cannot read a room the server says is over.
+      function roomLive()    { return exists(roomPath()) && room().expiresAt > request.time; }
+      // Used by the SUBCOLLECTION rules, where the room is not `resource`.
+      function isHost()      { return signedIn() && roomLive() && room().host == me(); }
+
+      // What ONE room may hold. Every cap here is mirrored by a constant in
+      // index.html (tests.html pins the pairs), and what they bound is the
+      // COUNT, so that no single write can hand every player's browser a
+      // million-element list to normalize and draw:
+      //   scores ≤ 32 keys     — the room's running total, one per uid ever in it
+      //   feed   ≤ 20 entries  — overwritten each turn, never a log
+      //   pack   ≤ 60 questions — a custom trivia pack, copied onto the room
+      //   cards  ≤ 40, words == 25 — the later games' lists, capped from day one
+      // `size()` on a non-list is an evaluation ERROR, which denies — so the
+      // type checks stay AHEAD of the size checks, and `pack` and the two game
+      // lists are guarded on presence first, because `size()` on a missing key
+      // is the same error and would refuse every room that has no pack.
+      function validRoom(d) {
+        return d.keys().hasOnly(['host', 'rev', 'schema', 'createdAt', 'expiresAt',
+                                 'phase', 'kind', 'game', 'scores', 'feed', 'pack'])
+          && d.keys().hasAll(['host', 'rev', 'schema', 'createdAt', 'expiresAt',
+                              'phase', 'game', 'scores', 'feed'])
+          && d.host is string && d.rev is int && d.rev >= 0 && d.schema is int
+          && d.createdAt is number
+          // The twelve-hour ceiling: six at creation, two at a time from the
+          // lobby, and never past twelve from NOW. Checked against the server's
+          // clock, so a client cannot hand itself a room that lasts a week.
+          && d.expiresAt is timestamp && d.expiresAt <= request.time + duration.value(12, 'h')
+          && d.phase in ['lobby', 'play', 'results']
+          && (d.kind == null || d.kind in ['trivia', 'draw', 'ice', 'codenames'])
+          && d.game is map && d.scores is map && d.scores.size() <= 32
+          && d.feed is list && d.feed.size() <= 20
+          && (!('pack' in d) || d.pack == null
+              || (d.pack is map && d.pack.qs is list && d.pack.qs.size() <= 60))
+          && (!('cards' in d.game) || (d.game.cards is list && d.game.cards.size() <= 40))
+          && (!('words' in d.game) || (d.game.words is list && d.game.words.size() == 25));
+      }
+      // The old host has not written its presence record for three minutes.
+      // `exists()` first: a host whose player document is GONE (they left, or
+      // the TTL took it) is stale too, and an unguarded get() there would be
+      // an error rather than a yes.
+      function hostStale() {
+        return !exists(playerPath(resource.data.host))
+          || get(playerPath(resource.data.host)).data.seenAt < request.time - duration.value(3, 'm');
+      }
+
+      // Knowing the code, while the room is live, is the read capability.
+      allow get:    if signedIn() && resource.data.expiresAt > request.time;
+      // The code must never be enumerable — this line IS the access model.
+      allow list:   if false;
+      // Anyone signed in may open a room, as its host, at rev 0. Bounded by
+      // validRoom and everything the header of this file lists.
+      allow create: if signedIn() && validRoom(request.resource.data)
+                    && request.resource.data.host == me() && request.resource.data.rev == 0;
+      // Every update raises rev by exactly one, and is one of three things:
+      allow update: if signedIn() && validRoom(request.resource.data)
+                    && request.resource.data.rev == resource.data.rev + 1
+                    && (
+                         // (1) THE HOST, writing anything — the game engine runs in
+                         //     the host's browser and this is its transaction. The
+                         //     host may keep the room or HAND IT to any player who
+                         //     is present (a host pressing Leave does this before
+                         //     going, so the room never waits three minutes for a
+                         //     handoff it could have had at once). Never to a uid
+                         //     that is not in the room: a room whose host is nobody
+                         //     is a room nobody can run until the next handoff.
+                         (resource.data.host == me()
+                          && (request.resource.data.host == me()
+                              || exists(playerPath(request.resource.data.host))))
+                         // (2) THE HANDOFF: a PLAYER taking the host's seat, and
+                         //     ONLY that — `host` and `rev` are the whole diff —
+                         //     only when the old host is stale, and only by somebody
+                         //     who is actually in the room. The client picks the
+                         //     longest-present online player; the server cannot
+                         //     check "longest-present" (rules cannot sort a
+                         //     collection), so two players racing for the seat is
+                         //     settled by rev: the second transaction fails and
+                         //     re-reads a room that already has a host.
+                      || (request.resource.data.host == me()
+                          && exists(playerPath(me()))
+                          && hostStale()
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['host', 'rev']))
+                    );
+      // The host closes the room. Players' own documents stay deletable by
+      // their owners afterwards (`me() == uid` below needs no room), and the
+      // TTL takes whatever is left.
+      allow delete: if signedIn() && resource.data.host == me();
+
+      // ── One document per player: presence and "how far I have answered" ──
+      match /players/{uid} {
+        // `seenAt == request.time` is how rules verify a serverTimestamp()
+        // sentinel: the server resolves the sentinel to request.time before
+        // evaluating, and no client can produce a value equal to a time it
+        // does not know. That is what makes presence UN-FORGEABLE — a player
+        // cannot claim to be online, and a stale host cannot pretend not to
+        // be. The cost: EVERY write to this document, a heartbeat or an
+        // answer's ansR, must carry a fresh sentinel. The client does.
+        // `ansR` is "the round I have answered", so everyone can draw
+        // "9 of 12 answered" without reading anybody's answer.
+        function validPlayer(d) {
+          return d.keys().hasOnly(['nick', 'joinedAt', 'seenAt', 'ansR', 'hue', 'expiresAt'])
+            && d.nick is string && d.nick.size() >= 1 && d.nick.size() <= 20
+            && d.joinedAt is number
+            && d.seenAt == request.time
+            && d.ansR is int && d.hue is int && d.hue >= 0 && d.hue <= 11
+            && d.expiresAt is timestamp;
+        }
+        // Everyone in a live room draws the roster.
+        allow read:           if signedIn() && roomLive();
+        // A player writes only their own record, and only into a live room —
+        // which is what stops a room being joined after it has ended.
+        allow create, update: if signedIn() && me() == uid && roomLive()
+                              && validPlayer(request.resource.data);
+        // Leaving, or being removed by the host.
+        allow delete:         if signedIn() && (me() == uid || isHost());
+      }
+
+      // ── One document per player: this round's answer ──────────────────────
+      match /answers/{uid} {
+        // A string, an int or a short list — each game's `encode()` decides
+        // which. Rules cannot iterate a list, so the ≤60-character cap on
+        // EACH ELEMENT of a three-line answer is CLIENT-SIDE ONLY
+        // (normalizeAnswers in index.html); the server bounds the list's
+        // length and the string's. `at == request.time` is the same sentinel
+        // proof as `seenAt`: a speed bonus is worked out from two server
+        // timestamps, never from a clock a client could set.
+        function validAnswer(d) {
+          return d.keys().hasOnly(['r', 'v', 'at', 'expiresAt'])
+            && d.r is int && d.at == request.time && d.expiresAt is timestamp
+            && ((d.v is string && d.v.size() <= 120) || d.v is int
+                || (d.v is list && d.v.size() <= 3));
+        }
+        // HOST-READ ONLY. An answer is secret until the host's reveal puts
+        // it on the room document, and a player must not be able to read
+        // the room's answers while the question is open. The host is the one
+        // client that needs them, and the host is whoever `room.host` names —
+        // which is why a handed-off host can continue mid-round.
+        allow get, list:      if isHost();
+        // Only somebody who has JOINED may answer: knowing the code is not
+        // enough to put an answer into a room.
+        allow create, update: if signedIn() && me() == uid && roomLive()
+                              && exists(playerPath(me()))
+                              && validAnswer(request.resource.data);
+        allow delete:         if signedIn() && (me() == uid || isHost());
+      }
+
+      // ── The live documents the later games need ───────────────────────────
+      // Written from day one so the rules file does not need a widening
+      // deploy per milestone. Nothing in the client touches either until the
+      // drawing game (strokes) and the icebreakers / Codenames (key) arrive.
+      match /live/strokes {
+        allow read:  if signedIn() && roomLive();
+        // The DRAWER, named on the room document by the host, is the only
+        // writer; the segment strings are parsed with a strict regex on
+        // every watcher and anything malformed is dropped there.
+        allow write: if signedIn() && roomLive() && room().game.get('drawer', '') == me()
+                     && request.resource.data.keys().hasOnly(['seq', 'segs', 'at', 'expiresAt'])
+                     && request.resource.data.seq is int
+                     && request.resource.data.segs is list && request.resource.data.segs.size() <= 400;
+      }
+      match /live/key {
+        // Readable ONLY by the uids the host has named as spymasters (or, for
+        // the icebreakers, by the host alone via `spies: [host]`): the one
+        // document in the room that some players must not see.
+        allow read:  if signedIn() && roomLive() && me() in room().game.get('spies', []);
+        allow write: if isHost() && request.resource.data.keys().hasOnly(['key', 'expiresAt']);
+      }
+    }
+
+    // Everything else is denied by default: there is deliberately no
+    // `match /{document=**}` catch-all, and the app touches no other path.
+    // A `users/{uid}` document arrives with the last milestone (Google
+    // sign-in for a standing house) and gets its own block then.
+  }
+}
