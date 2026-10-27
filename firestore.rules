@@ -55,6 +55,12 @@ service cloud.firestore {
 
     function signedIn() { return request.auth != null; }   // FREE under anonymous auth
     function me()       { return request.auth.uid; }
+    // A GOOGLE account (M6) - the one thing that costs an account something.
+    // Asked of the token's identities rather than sign_in_provider, because
+    // the app LINKS Google onto an anonymous uid, and a linked account's
+    // identities name google.com whichever way it last signed in. An
+    // anonymous token's identities map is empty.
+    function google()   { return signedIn() && request.auth.token.firebase.identities.keys().hasAny(['google.com']); }
 
     match /rooms/{code} {
       function roomPath()    { return /databases/$(database)/documents/rooms/$(code); }
@@ -83,7 +89,7 @@ service cloud.firestore {
       // is the same error and would refuse every room that has no pack.
       function validRoom(d) {
         return d.keys().hasOnly(['host', 'rev', 'schema', 'createdAt', 'expiresAt',
-                                 'phase', 'kind', 'game', 'scores', 'feed', 'pack'])
+                                 'phase', 'kind', 'game', 'scores', 'feed', 'pack', 'house'])
           && d.keys().hasAll(['host', 'rev', 'schema', 'createdAt', 'expiresAt',
                               'phase', 'game', 'scores', 'feed'])
           && d.host is string && d.rev is int && d.rev >= 0 && d.schema is int
@@ -99,7 +105,11 @@ service cloud.firestore {
           && (!('pack' in d) || d.pack == null
               || (d.pack is map && d.pack.qs is list && d.pack.qs.size() <= 60))
           && (!('cards' in d.game) || (d.game.cards is list && d.game.cards.size() <= 40))
-          && (!('words' in d.game) || (d.game.words is list && d.game.words.size() == 25));
+          && (!('words' in d.game) || (d.game.words is list && d.game.words.size() == 25))
+          // The house the room was opened for (M6): a label, never a key to
+          // anything - the house's own rules decide who writes its board.
+          // Absent on every other room.
+          && (!('house' in d) || (d.house is string && d.house.size() == 8));
       }
       // The old host has not written its presence record for three minutes.
       // `exists()` first: a host whose player document is GONE (they left, or
@@ -233,9 +243,75 @@ service cloud.firestore {
       }
     }
 
+    // -- M6: one document per GOOGLE account -------------------------------
+    // Its nickname and the houses it belongs to ({id, name} each), so the
+    // houses follow the account to another browser. Self only, and never
+    // for an anonymous uid. Every client write merges.
+    match /users/{uid} {
+      function validUser(d) {
+        return d.keys().hasOnly(['nick', 'houses', 'schema'])
+          && (!('nick' in d) || (d.nick is string && d.nick.size() <= 20))
+          && (!('houses' in d) || (d.houses is list && d.houses.size() <= 20))
+          && (!('schema' in d) || d.schema is int);
+      }
+      allow read:           if google() && me() == uid;
+      allow create, update: if google() && me() == uid && validUser(request.resource.data);
+      allow delete:         if google() && me() == uid;
+    }
+
+    // -- M6: a HOUSE - a standing group with a cross-night leaderboard ------
+    // The eight-character code is the read capability, exactly as a room's
+    // six is: any GOOGLE account may `get` a house by its code, nobody may
+    // `list` them. MEMBERS write it (anything but the owner, rev + 1 every
+    // time); somebody who is not yet a member may write ONE thing - their
+    // own entry in `members` - which is joining. Removing somebody is
+    // therefore cosmetic (League Night's lesson): anyone with the code can
+    // join again, and a house that must be closed to someone is a new
+    // house. The owner is a field nobody changes and must stay a member;
+    // only the owner deletes.
+    //   members <= 32 keys      - {nick, at} each
+    //   board   <= 64 keys      - members, and people who have left
+    //   last.s  <= 32 keys      - what has been counted from tonight's room
+    // The board is written by whichever member's browser is in the room;
+    // the client's tally is idempotent, and the server cannot check a score
+    // against a room (that is the room host's honesty, as everywhere here).
+    match /houses/{id} {
+      function validHouse(d) {
+        return d.keys().hasOnly(['owner', 'rev', 'schema', 'name', 'createdAt', 'members',
+                                 'room', 'roomExp', 'board', 'last'])
+          && d.keys().hasAll(['owner', 'rev', 'schema', 'name', 'createdAt', 'members', 'board'])
+          && d.owner is string && d.rev is int && d.rev >= 0 && d.schema is int
+          && d.createdAt is number
+          && d.name is string && d.name.size() >= 1 && d.name.size() <= 30
+          && d.members is map && d.members.size() <= 32 && d.owner in d.members
+          && d.board is map && d.board.size() <= 64
+          && (!('room' in d) || d.room == null || (d.room is string && d.room.size() == 6))
+          && (!('roomExp' in d) || d.roomExp is number)
+          && (!('last' in d) || d.last == null
+              || (d.last is map && d.last.keys().hasOnly(['code', 's'])
+                  && d.last.s is map && d.last.s.size() <= 32));
+      }
+      allow get:    if google();
+      allow list:   if false;
+      allow create: if google() && validHouse(request.resource.data)
+                    && request.resource.data.owner == me() && request.resource.data.rev == 0
+                    && request.resource.data.members.keys().hasOnly([me()])
+                    && request.resource.data.board.size() == 0;
+      allow update: if google() && validHouse(request.resource.data)
+                    && request.resource.data.rev == resource.data.rev + 1
+                    && request.resource.data.owner == resource.data.owner
+                    && (
+                         // (1) A MEMBER, writing anything else.
+                         me() in resource.data.members
+                         // (2) JOINING: my own key in `members` and nothing more.
+                      || (me() in request.resource.data.members
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'rev'])
+                          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([me()]))
+                    );
+      allow delete: if google() && resource.data.owner == me();
+    }
+
     // Everything else is denied by default: there is deliberately no
     // `match /{document=**}` catch-all, and the app touches no other path.
-    // A `users/{uid}` document arrives with the last milestone (Google
-    // sign-in for a standing house) and gets its own block then.
   }
 }

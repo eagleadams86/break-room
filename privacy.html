@@ -82,12 +82,14 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
        stays an ordinary <div> rather than becoming the <main>. -->
   <main>
     <h1>Privacy Policy</h1>
-    <p class="meta">Effective 27 October 2026</p>
+    <p class="meta">Effective 27 October 2026 (houses added the same day)</p>
 
     <div class="card">
-      <p><strong>There is no account.</strong> You pick a nickname for the evening; a room
+      <p><strong>No account is needed.</strong> You pick a nickname for the evening; a room
         lives in the cloud for a few hours so the people in it can see each other, and once
-        it has ended nobody can open it again. Nothing identifies you across nights.</p>
+        it has ended nobody can open it again. Without an account, nothing identifies you
+        across nights. Signing in with Google is optional, and only for a
+        <strong>house</strong> — a standing group with a leaderboard across nights.</p>
     </div>
 
     <h2>What Is Stored in This Browser</h2>
@@ -150,14 +152,39 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
       and it is the only thing that persists between visits in this browser. It is kept in
       the browser's own storage and never shown to anyone.</p>
 
+    <h2>Signing In With Google, and Houses</h2>
+    <p>Only if you choose to. Google's sign-in code is fetched from
+      <code>accounts.google.com</code> only when you press or reach for a Sign In button —
+      never on an ordinary visit. Signing in attaches your Google account to this browser's
+      identifier, so you stay the same player in the room you are in. Firebase then knows
+      that identifier belongs to your Google account (it holds your Google email address and
+      name as any Firebase sign-in does); the app itself shows only your first name, in its
+      own header, and stores neither.</p>
+    <p>A signed-in account can start or join a <strong>house</strong>. What is stored, and for
+      as long as the house exists:</p>
+    <ul>
+      <li><strong>Your account's record</strong>, readable only by you: your nickname and the
+        houses you belong to (their codes and names).</li>
+      <li><strong>The house</strong>, readable by anyone signed in with Google who holds its
+        eight-letter code: its name, the nickname of each member, which room it has open
+        tonight, and its <strong>leaderboard</strong> — for each member, a nickname, total
+        points, the number of nights they scored, and their best night. Guests who play in a
+        house's room without an account are never on it.</li>
+    </ul>
+    <p>Leaving a house removes you from its members; your row stays on its leaderboard,
+      marked as having left. The person who started a house can delete it, which deletes its
+      leaderboard for everyone. Signing out leaves your houses with the account.</p>
+
     <h2>What Is Not</h2>
     <ul>
       <li>No analytics, no tracking, no advertising, no cookies of the app's own.</li>
       <li>No third-party script beyond the Firebase client library, loaded from Google's
-        <code>www.gstatic.com</code>. The page talks to three Google endpoints — sign-in,
-        token refresh and the database — and to nothing else; a Content Security Policy on
-        the page refuses anything further.</li>
-      <li>No email address, real name or other personal information is asked for or kept.</li>
+        <code>www.gstatic.com</code>, and — only when you press Sign In — Google's sign-in
+        client from <code>accounts.google.com</code>. The page talks to Google's sign-in,
+        token and database endpoints and to nothing else; a Content Security Policy on the
+        page refuses anything further.</li>
+      <li>No email address, real name or other personal information is asked for or kept by
+        the app. A Google sign-in, if you choose one, is held by Firebase as described above.</li>
     </ul>
 
     <h2>Backups</h2>

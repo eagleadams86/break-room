@@ -33,8 +33,11 @@
      never by a <script src>. connect-src names the three Google endpoints a room
      needs and NOTHING on firebaseapp.com: the corporate filter that blocks that
      hostname is the whole reason this app signs in anonymously (see the module).
-     accounts.google.com arrives only with the last milestone (Google sign-in for
-     a standing "house"), and only then does frame-src appear.
+     accounts.google.com arrived with M6 (Google sign-in for a standing
+     "house"): script for Google Identity Services, connect and frame for its
+     popup — League Night's exact line — plus www.googleapis.com, which the
+     Google credential exchange calls. GIS is fetched only when a reader
+     reaches for a sign-in door, never on an ordinary visit.
 
      tests.html pins this host list exactly, so a new endpoint is a decision that
      fails a test before it ships. manifest-src and worker-src are SPELLED OUT
@@ -45,7 +48,7 @@
      'unsafe-inline' is unavoidable: a single-file app, no build step, no hashes.
      form-action is 'self' because dialogs submit with method="dialog".
      frame-ancestors is ignored in a meta tag; it needs a real header. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com; manifest-src 'self'; worker-src 'self'; frame-src https://accounts.google.com; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- NEVER maximum-scale=1 or user-scalable=no. They stop iOS zooming on a
      focused field by taking pinch-zoom from everyone, which is an accessibility
@@ -863,6 +866,25 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   #inviteLink { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); color: var(--text-secondary); }
   .recent { display: flex; gap: var(--sp-4); flex-wrap: wrap; justify-content: center; }
   .recent button { font-family: var(--font-mono); letter-spacing: 0.08em; }
+  #houseCode, #houseDlgCode { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  #houseLink { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+  /* ── The account button (M6) ───────────────────────────────────────────────
+     A FIXED width in em, not a floor: "☁️ Sign In" and a first name are
+     different widths, and a name can be long, so the button is one size from
+     first paint and a long name is cut with an ellipsis (the whole name is in
+     its aria-label). em, because a coarse pointer gives the row --fs-base
+     type (memory: an em floor covers two type sizes). */
+  #syncBtn { width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── The houses on the home card (M6) ─────────────────────────────────────── */
+  .house-list { list-style: none; margin: 0; padding: 0; }
+  .house-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4);
+                   padding: var(--sp-4) 0; border-bottom: 1px solid var(--border); }
+  .house-list li:last-child { border-bottom: 0; }
+  .house-list .hname { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+  .house-list .hname small { display: block; font-weight: 400; color: var(--text-secondary); font-size: var(--fs-sm); }
+  #houseCard h3, #houseDialog h3 { margin: var(--sp-5) 0 var(--sp-3); font-size: var(--fs-base); }
 
   /* ── The lobby and a game, side by side ────────────────────────────────────
      The roster is the thing to glance at; the game card is the thing to look
@@ -1046,6 +1068,13 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
          that scrolls sideways when it does not fit (2026-09-14). -->
     <div class="headrow">
     <div class="headctl">
+    <!-- M6. FIRST in the row (the family's order: the control whose label
+         changes sits at the far left, where growth pushes into empty space)
+         and PAINTED BY THE MARKUP at a fixed width in em, so neither the
+         module arriving nor the label changing from "Sign In" to a first
+         name can move the header (memory: sync-button-never-moves-header).
+         A long name is cut with an ellipsis; the full one is in the label. -->
+    <button class="no-print" id="syncBtn" aria-label="Sign in with Google for a house" title="Sign in with Google to keep a house and its leaderboard">☁️ Sign In</button>
     <button class="no-print" id="dataBtn" title="Back up or restore your custom question packs, or forget this browser"><span aria-hidden="true">⇩</span> Back Up</button>
     <button class="no-print" id="inviteBtn" hidden title="Invite someone to this room"><span aria-hidden="true">↗</span> Invite</button>
     <label class="sr-only" for="themeSel">Theme</label>
@@ -1120,6 +1149,42 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
       <p><strong>Try a Demo Room</strong> opens a room of invented players who answer on their own,
         so you can see the lobby and play a round before inviting anyone real. Nothing in it is saved.</p>
     </div>
+  </div>
+
+  <!-- ── Houses (M6) ──────────────────────────────────────────────────────────
+       What a Google account adds: a standing group with an eight-letter code,
+       tonight's room, and a leaderboard across nights. Everything above still
+       works with no account at all. The sign-in button and both forms are in
+       the MARKUP, because the sign-in button is a door the module warms by id
+       (SIGNIN_DOORS) and a button drawn by innerHTML would lose that. -->
+  <div class="card" id="houseCard" hidden>
+    <h2>Houses
+      <button class="tile-help" type="button" data-help="house" aria-label="What a house is">i</button></h2>
+    <div id="houseOut">
+      <p>A house is a standing room for a group that meets again — your team’s Friday, the
+        friends’ quiz night. It keeps a <strong>leaderboard across nights</strong> and shows
+        when tonight’s room is open. Houses need a Google account; rooms never do.</p>
+      <p class="actions"><button type="button" class="primary" id="houseSignInBtn">Sign In With Google</button></p>
+    </div>
+    <ul class="house-list" id="houseList"></ul>
+    <div id="houseForms" hidden>
+      <div class="joinrow">
+        <div class="field">
+          <label for="houseName">New house name</label>
+          <input type="text" id="houseName" maxlength="30" autocomplete="off" placeholder="Friday Quiz">
+        </div>
+        <button type="button" id="houseCreateBtn">Start a House</button>
+      </div>
+      <div class="joinrow">
+        <div class="field">
+          <label for="houseCode">House code</label>
+          <input type="text" id="houseCode" maxlength="10" autocomplete="off" autocapitalize="characters"
+                 spellcheck="false" placeholder="8 letters">
+        </div>
+        <button type="button" id="houseJoinBtn">Join a House</button>
+      </div>
+    </div>
+    <p class="warn-line" id="houseWarn" role="status"></p>
   </div>
 
   <!-- A room: the lobby, a game or the results. Built entirely by render(),
@@ -1218,6 +1283,34 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   </div>
 </dialog>
 
+<!-- ── One house: its code, its leaderboard, its members (M6) ───────────────
+     Filled by openHouse() from the house as the listener last saw it. The
+     table is the cross-night leaderboard; nothing in it is free text but
+     the nicknames, which are escaped like every other. -->
+<dialog id="houseDialog" aria-labelledby="houseTitle">
+  <h2 id="houseTitle">House</h2>
+  <p>Anyone signed in with Google who has this code can join the house. Scores count for
+    <strong>members</strong> in any room opened from the house; guests play as usual.</p>
+  <div class="code-row" style="margin-bottom:var(--sp-5)"><span class="code" id="houseDlgCode"></span></div>
+  <div class="field">
+    <label for="houseLink">Invite link</label>
+    <input type="text" id="houseLink" readonly aria-label="House invite link">
+  </div>
+  <div class="row" style="margin-top:10px;margin-bottom:var(--sp-5)">
+    <button type="button" id="houseCopyBtn">Copy Link</button>
+  </div>
+  <h3>Leaderboard
+    <button class="tile-help" type="button" data-help="board" aria-label="How the leaderboard is counted">i</button></h3>
+  <div id="houseBoard"></div>
+  <h3>Members</h3>
+  <p id="houseMembers"></p>
+  <div class="row" style="margin-top:10px">
+    <button type="button" id="houseLeaveBtn" class="danger">Leave the House</button>
+    <span class="spacer" style="flex:1 1 auto"></span>
+    <button type="button" class="primary" id="houseCloseBtn">Done</button>
+  </div>
+</dialog>
+
 <!-- ── Custom packs ──────────────────────────────────────────────────────────
      The host's own questions, kept in this browser and copied onto the room
      when a game starts from one. A pasted sheet, one question per line. -->
@@ -1285,7 +1378,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 4;
+const SCHEMA = 5;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -1352,6 +1445,16 @@ const PACKS_MAX = 10;          /* custom packs kept in this browser */
 const RECENT_MAX = 5;
 const PHASES = ['lobby', 'play', 'results'];
 const KINDS = ['trivia', 'draw', 'ice', 'codenames'];
+/* A HOUSE (M6) is the standing room a signed-in group keeps across nights.
+   Its code is EIGHT letters from the same alphabet, so a house code can never
+   be read as a room code or the other way round, and `list: false` makes it a
+   key exactly as a room code is. */
+const HOUSE_LEN = 8;
+const HOUSE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
+const HOUSE_NAME_MAX = 30;
+const HOUSE_MEMBERS_MAX = 32;  /* members map ≤ 32 keys in the rules */
+const BOARD_MAX = 64;          /* board map ≤ 64 keys: members, and people who have left */
+const HOUSES_MAX = 20;         /* houses one account belongs to: users/{uid}.houses ≤ 20 */
 
 /* ── Time, in one place ────────────────────────────────────────────────────
    A room lives six hours from its creation; the host may extend it two hours
@@ -1494,6 +1597,10 @@ function normalizeRoom(raw) {
     scores: normalizeScores(raw.scores),
     feed: normalizeFeed(raw.feed),
     pack: normalizePack(raw.pack),
+    /* The house this room was opened for (M6), or null. Absent on every
+       room that is not a house's, which is what keeps those rooms valid
+       under rules that predate the field. */
+    house: HOUSE_RE.test(String(raw.house || '')) ? String(raw.house) : null,
   };
 }
 /* A player list. Sorted by `joinedAt` so the roster's order is the order
@@ -1556,6 +1663,169 @@ function nextHost(list, t) {
 function hostIsStale(list, hostUid, t) {
   const h = (list || []).find((p) => p.uid === hostUid);
   return !h || (t - h.seenAt) >= HOST_STALE_MS;
+}
+
+/* ═══════════════════════ Houses (M6, Google sign-in) ══════════════════════
+   Everything above works with no account at all, and still does. A HOUSE is
+   what signing in with Google adds: a standing group with an eight-letter
+   code, the room it has open tonight, and a leaderboard that outlives the
+   night. Only Google-signed accounts can read or write one (the rules check
+   the token's identities), so a house never holds an anonymous uid.
+
+   THE ACCOUNT IS THE SAME PLAYER. Signing in LINKS Google onto this
+   browser's anonymous uid, so the seat in a room, the scores against it and
+   the house membership are one id. Only an account that already exists here
+   (signed in on another browser first) changes the uid, and the app leaves
+   and rejoins the room for it (`switchAccount`).
+
+   houses/{code} = { owner, rev, schema, name, createdAt,
+                     members: {uid: {nick, at}},       ≤ 32
+                     room: CODE | null, roomExp: ms,   tonight's room, if any
+                     board: {uid: {n, p, nt, b}},      ≤ 64 — name, points, nights, best night
+                     last: {code, s: {uid: points}} }  what has been counted from `room`
+   users/{uid}    = { nick, houses: [{id, name}], schema }  — self only, merged */
+/* What a tally remembers as "the room it counted": six capitals or digits,
+   a shade wider than CODE_RE because the DEMO room's code starts "DEMO" —
+   an O no real code can have, on purpose — and the demo house is counted
+   by the same tally. It is only ever compared, never joined. */
+const TALLY_CODE_RE = /^[A-Z0-9]{6}$/;
+function randomHouseCode() {
+  const bytes = new Uint8Array(HOUSE_LEN);
+  crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < HOUSE_LEN; i++) out += CODE_ALPHABET[bytes[i] % 32];
+  return out;
+}
+function cleanHouseName(raw) {
+  return String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim().slice(0, HOUSE_NAME_MAX);
+}
+/* Another browser wrote this, like a room. Rebuilt, never merged; a member
+   or board row whose uid fails ID_RE is dropped with its record. */
+function normalizeHouse(raw, id) {
+  if (!raw || typeof raw !== 'object' || !HOUSE_RE.test(String(id || ''))) return null;
+  const owner = String(raw.owner == null ? '' : raw.owner);
+  if (!ID_RE.test(owner)) return null;
+  const members = {};
+  const rm = raw.members && typeof raw.members === 'object' ? raw.members : {};
+  Object.keys(rm).filter((k) => ID_RE.test(k)).slice(0, HOUSE_MEMBERS_MAX).forEach((k) => {
+    const m = rm[k] && typeof rm[k] === 'object' ? rm[k] : {};
+    members[k] = { nick: String(m.nick == null ? '' : m.nick).trim().slice(0, NICK_MAX) || 'Someone', at: toMs(m.at) };
+  });
+  const board = {};
+  const rb = raw.board && typeof raw.board === 'object' ? raw.board : {};
+  Object.keys(rb).filter((k) => ID_RE.test(k)).slice(0, BOARD_MAX).forEach((k) => {
+    const b = rb[k] && typeof rb[k] === 'object' ? rb[k] : {};
+    board[k] = { n: String(b.n == null ? '' : b.n).trim().slice(0, NICK_MAX) || 'Someone',
+                 p: int(b.p, 0, 1e9, 0), nt: int(b.nt, 0, 1e6, 0), b: int(b.b, 0, 1e9, 0) };
+  });
+  const roomCode = cleanCode(raw.room);
+  let last = null;
+  if (raw.last && typeof raw.last === 'object' && TALLY_CODE_RE.test(cleanCode(raw.last.code))) {
+    last = { code: cleanCode(raw.last.code), s: normalizeScores(raw.last.s) };
+  }
+  return {
+    id: String(id), owner: owner,
+    rev: int(raw.rev, 0, 1e9, 0), schema: int(raw.schema, 0, 1e6, 1),
+    name: cleanHouseName(raw.name) || 'Our House',
+    createdAt: toMs(raw.createdAt),
+    members: members, board: board,
+    room: CODE_RE.test(roomCode) ? roomCode : null,
+    roomExp: toMs(raw.roomExp),
+    last: last,
+  };
+}
+/* This account's own document: its nickname and the houses it belongs to. */
+function normalizeUserDoc(raw) {
+  const out = { nick: '', houses: [] };
+  if (!raw || typeof raw !== 'object') return out;
+  out.nick = String(raw.nick == null ? '' : raw.nick).trim().slice(0, NICK_MAX);
+  const seen = new Set();
+  out.houses = (Array.isArray(raw.houses) ? raw.houses : []).map((h) => {
+    const id = String(h && h.id || '');
+    if (!HOUSE_RE.test(id) || seen.has(id)) return null;
+    seen.add(id);
+    return { id: id, name: cleanHouseName(h.name) || 'Our House' };
+  }).filter(Boolean).slice(0, HOUSES_MAX);
+  return out;
+}
+/* Tonight's room, if the house says it has one that has not ended. */
+function houseRoomLive(h, t) {
+  return !!(h && h.room && h.roomExp > t);
+}
+
+/* ── The leaderboard tally: PURE, and idempotent by construction ───────────
+   `last` is what this house has ALREADY counted from the room named in it.
+   The tally adds only the difference between the room's running scores and
+   that, so running it twice — or from three members' browsers at once, which
+   is allowed — counts nothing twice: the second run finds no difference and
+   returns null. A new room starts `last` again from nothing.
+
+   Only MEMBERS are counted. A guest in a house room plays and scores in the
+   room as ever; the house's board is the people who belong to it. A night is
+   counted the first time a member scores in that room; the best night is the
+   highest room total a member has reached. Also carries the room's expiry
+   across when it has moved (the host pressed "add 2 hours"), so the house's
+   Join button does not give up on a room that is still open. */
+function houseTally(h, code, scores, roomExp) {
+  if (!h || !TALLY_CODE_RE.test(String(code || ''))) return null;
+  const same = !!(h.last && h.last.code === code);
+  const prev = same ? h.last.s : {};
+  const board = JSON.parse(JSON.stringify(h.board || {}));
+  const s = {};
+  let changed = !same;
+  Object.keys(scores || {}).forEach((u) => {
+    if (!h.members[u]) return;
+    const cur = Math.max(0, int(scores[u], 0, 1e9, 0));
+    const was = Math.max(0, int(prev[u], 0, 1e9, 0));
+    s[u] = Math.max(cur, was);
+    if (cur <= was) return;
+    const row = board[u] || { n: h.members[u].nick, p: 0, nt: 0, b: 0 };
+    row.n = h.members[u].nick;
+    row.p += cur - was;
+    if (was === 0) row.nt += 1;
+    row.b = Math.max(row.b, cur);
+    board[u] = row;
+    changed = true;
+  });
+  /* Over the cap, the lowest scorers who are no longer members go first —
+     never a member. */
+  const keys = Object.keys(board);
+  if (keys.length > BOARD_MAX) {
+    keys.filter((u) => !h.members[u]).sort((a, b) => board[a].p - board[b].p)
+      .slice(0, keys.length - BOARD_MAX).forEach((u) => { delete board[u]; });
+  }
+  const patch = {};
+  if (changed) { patch.board = board; patch.last = { code: code, s: s }; }
+  if (h.room === code && roomExp && roomExp !== h.roomExp) patch.roomExp = roomExp;
+  return Object.keys(patch).length ? patch : null;
+}
+/* Which browser in the room keeps the house's board: the host if they are a
+   member and online, else the longest-present online member. One writer is
+   tidiness, not correctness — the tally above is safe from any number. */
+function houseRecorder(list, hostUid, members, t) {
+  const on = (list || []).filter((p) => members && members[p.uid] && isOnline(p, t));
+  if (on.some((p) => p.uid === hostUid)) return hostUid;
+  return on.length ? on[0].uid : null;
+}
+/* The board, as rows to draw: points, then nights, then name. */
+function boardRows(h) {
+  if (!h) return [];
+  return Object.keys(h.board).map((u) => Object.assign({ uid: u, member: !!h.members[u] }, h.board[u]))
+    .sort((a, b) => b.p - a.p || b.nt - a.nt || a.n.localeCompare(b.n));
+}
+/* `#house=CODE` — a house invite, read as leniently as a join link. */
+const HOUSE_HASH_RE = /^#house=/i;
+function parseHouseHash(hash) {
+  let h = String(hash || '');
+  try { h = decodeURIComponent(h); } catch (e) { /* read it raw */ }
+  if (!HOUSE_HASH_RE.test(h)) return null;
+  const m = /(?:^|[^A-Z0-9])([A-Z2-9]{8})(?![A-Z0-9])/i.exec(h.slice(7));
+  if (!m) return null;
+  const code = m[1].toUpperCase();
+  return HOUSE_RE.test(code) ? code : null;
+}
+function houseLink(code) {
+  return location.origin + location.pathname + '#house=' + code;
 }
 
 /* Refuse data from a newer build, with the saved copy untouched, and say why.
@@ -3892,6 +4162,7 @@ function sendCnPick(r, v) {
 function render() {
   const inRoom = !!room;
   document.getElementById('homeCard').hidden = inRoom;
+  document.getElementById('houseCard').hidden = inRoom;
   document.getElementById('roomView').hidden = !inRoom;
   document.getElementById('inviteBtn').hidden = !inRoom;
   if (inRoom) renderRoom(); else renderHome();
@@ -3912,6 +4183,7 @@ function renderHome() {
   document.getElementById('createBtn').disabled = !cloud;
   document.getElementById('joinBtn').disabled = !cloud;
   document.getElementById('demoBtn').disabled = !!room;
+  renderHouses();
 }
 
 /* ═══════════════════════════ The room on screen ══════════════════════════
@@ -3978,6 +4250,7 @@ function renderRoomCard() {
     + '<p class="hint" style="margin:var(--sp-4) 0 0">Ends in <span id="roomLeft">' + esc(fmtLeft(left)) + '</span>'
     + (canExtend ? ' · <button type="button" class="link" id="extendBtn">add 2 hours</button>' : '')
     + (iAmHost() && !canExtend ? ' · at the twelve-hour limit' : '') + '</p>'
+    + houseLine()
     + '<div class="row-actions" style="justify-content:flex-start;margin-top:var(--sp-5)">'
     + '<button type="button" id="leaveBtn">Leave the Room</button></div>'
     + '</div>';
@@ -4168,16 +4441,23 @@ function heartbeat() {
 /* Out of a room. As the host with others online, the room is HANDED to the
    next player first, so it never waits three minutes for a handoff it could
    have had at once; as the last one out, the room is closed. */
-async function leaveRoom(reason) {
+async function leaveRoom(reason, opts) {
   const t = transport();
   const code = local.code;
+  /* `switching`: this browser is about to become another account (M6) and
+     will rejoin the same room as it. The room is handed on if there is
+     anybody to hand it to, NEVER closed, and the code is kept for the
+     rejoin. Alone as host, the old seat's record simply goes, and the new
+     uid's rejoin takes the seat at once — the rules call a host with no
+     player record stale. */
+  const switching = !!(opts && opts.switching);
   clearInterval(heartbeatTimer); heartbeatTimer = null;
   clearInterval(tickTimer); tickTimer = null;
   let handTo = null, closeRoom = false;
   if (room && iAmHost()) {
     const others = players.filter((p) => p.uid !== me);
     handTo = nextHost(others, now());
-    closeRoom = !handTo;
+    closeRoom = !handTo && !switching;
   }
   try { await t.leave({ handTo: handTo, closeRoom: closeRoom }); } catch (e) { console.warn('leave', e); }
   t.stop();
@@ -4185,11 +4465,12 @@ async function leaveRoom(reason) {
   room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
   iceKey = null; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null };
   if (wasDemo) {
+    delete houses[DEMO_HOUSE];
     const id = window.brCloud && window.brCloud.uid ? window.brCloud.uid() : null;
     me = ID_RE.test(String(id || '')) ? String(id) : null;
   }
   pendingRev = 0; pushInFlight = false;
-  if (local.code === code) { local.code = ''; save(); }
+  if (local.code === code && !switching) { local.code = ''; save(); }
   render();
   if (reason) toast(reason);
 }
@@ -4286,16 +4567,46 @@ window.brApp = {
       transport().clearStrokes(next.game.round).catch((e) => console.warn('final clear', e));
     }
     room = next;
+    if (room.house) watchWanted();
     render();
     hostTick();
+    houseTick();
   },
-  onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); },
+  onPlayers: (list) => { players = normalizePlayers(list); if (room) render(); hostTick(); houseTick(); },
   onAnswers: (list) => { answers = normalizeAnswers(list); hostTick(); },
   onStrokes: (raw) => { strokesDoc = normalizeStrokes(raw); padAdopt(); },
   onKey: (raw) => { iceKey = normalizeKey(raw); if (room && room.kind === 'codenames') render(); hostTick(); },
   onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
   onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
   noteWrite: noteWrite,
+  /* M6: the account, its own document, and the houses it shows. */
+  randomHouseCode: randomHouseCode,
+  normalizeHouse: normalizeHouse,
+  normalizeUserDoc: normalizeUserDoc,
+  onAccount: (a) => {
+    const was = account.google;
+    account = { google: !!(a && a.google), name: String(a && a.name || '').slice(0, NICK_MAX) };
+    if (!account.google) { userDoc = normalizeUserDoc(null); houses = {}; }
+    render();
+    if (account.google && !was && houseArrival) setTimeout(houseArrive, 0);
+  },
+  onUserDoc: (raw) => {
+    userDoc = normalizeUserDoc(raw);
+    if (userDoc.nick && !local.nick) { local.nick = userDoc.nick; save(); }
+    watchWanted();
+    render();
+    if (houseArrival) houseArrive();
+  },
+  onHouse: (id, raw) => {
+    if (!HOUSE_RE.test(String(id))) return;
+    if (raw && Number(raw.schema || 1) > SCHEMA) haltForNewerData(raw.schema);
+    houses[id] = raw ? normalizeHouse(raw, id) : null;
+    if (houseOnScreen === id) { if (houses[id]) fillHouseDialog(); else $('houseDialog').close(); }
+    render();
+    houseTick();
+  },
+  beforeSwitch: () => switchAway(),
+  askSignOut: () => askSignOut(),
 };
 function describeCloudError(e) {
   const code = String((e && e.code) || '');
@@ -4328,6 +4639,7 @@ async function doCreate(nick) {
   try {
     const code = await t.create(nick);
     enterRoom(code);
+    rememberNick(nick);
     toast('Room ' + code + ' is open — invite people with the ↗ Invite button');
   } catch (e) {
     console.warn('create', e);
@@ -4339,7 +4651,7 @@ async function doJoin(code, nick, quiet) {
   $('joinBtn').disabled = true;
   try {
     const r = await t.join(code, nick);
-    if (r === 'joined') { enterRoom(code); if (!quiet) toast('You’re in'); return; }
+    if (r === 'joined') { enterRoom(code); rememberNick(nick); if (!quiet) toast('You’re in'); return; }
     if (local.code === code) { local.code = ''; save(); }
     $('homeWarn').textContent = r === 'not-found' ? 'No room has the code ' + code + ' — check it with whoever started it.'
       : r === 'expired' ? 'Room ' + code + ' has ended.'
@@ -4374,6 +4686,186 @@ if (joinArrival) {
   try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
 }
 
+/* ═══════════════════════ Houses on screen (M6) ═══════════════════════════
+   `account` is what the module says about this browser's sign-in;
+   `userDoc` is the account's own document (its houses); `houses` holds each
+   house as its listener last delivered it — another browser's data, through
+   normalizeHouse like a room. All memory only: a house is never in
+   localStorage, a backup or a link beyond its own code. */
+let account = { google: false, name: '' };
+let userDoc = normalizeUserDoc(null);
+let houses = {};
+let houseArrival = parseHouseHash(location.hash);
+if (houseArrival) {
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+}
+const signedInHere = () => account.google && !!window.brCloud && !!window.brCloud.google && window.brCloud.google();
+
+/* The houses to listen to: the account's own, and the house of the room
+   on screen (a member who opened a room by its code still counts it). */
+function watchWanted() {
+  if (demoOn || !window.brCloud || !window.brCloud.watchHouses) return;
+  const ids = userDoc.houses.map((h) => h.id);
+  if (room && room.house && ids.indexOf(room.house) === -1) ids.push(room.house);
+  window.brCloud.watchHouses(ids);
+}
+function rememberNick(nick) {
+  if (demoOn || !signedInHere() || nick === userDoc.nick) return;
+  window.brCloud.saveNick(nick).catch((e) => console.warn('nick', e));
+}
+function houseNick() {
+  return $('nickBox').value.trim().slice(0, NICK_MAX) || local.nick || userDoc.nick || account.name || '';
+}
+
+/* The Houses card. Signed out: what a house is, and the door. Signed in:
+   each house as a row — its name, how many are in it, tonight's room or the
+   button that opens one — and the two forms. */
+function renderHouses() {
+  const out = $('houseOut'), list = $('houseList'), forms = $('houseForms');
+  if (!out) return;
+  const g = account.google;
+  out.hidden = g;
+  forms.hidden = !g;
+  $('houseSignInBtn').disabled = !cloudOn();
+  if (!g) { list.innerHTML = ''; if (houseArrival) $('houseWarn').textContent = 'Sign in with Google to join the house ' + houseArrival + '.'; return; }
+  const t = now();
+  list.innerHTML = userDoc.houses.map((u) => {
+    const h = houses[u.id];
+    const name = h ? h.name : u.name;
+    const n = h ? Object.keys(h.members).length : 0;
+    const live = houseRoomLive(h, t);
+    return '<li data-house="' + esc(u.id) + '"><span class="hname">' + esc(name)
+      + '<small>' + (h ? n + (n === 1 ? ' member' : ' members') + (live ? ' · tonight’s room is open' : '') : 'Loading…') + '</small></span>'
+      + '<button type="button" class="btn-small" data-house-open="' + esc(u.id) + '">' + (live ? 'Join Tonight’s Room' : 'Open Tonight’s Room') + '</button>'
+      + '<button type="button" class="btn-small" data-house-board="' + esc(u.id) + '">Leaderboard</button></li>';
+  }).join('');
+}
+/* A line on the room card when the room belongs to a house. */
+function houseLine() {
+  if (!room || !room.house) return '';
+  const h = houses[room.house];
+  if (!h) return '<p class="hint" style="margin:var(--sp-3) 0 0">Opened from a house — members’ scores count on its leaderboard.</p>';
+  const mine = !!(me && h.members[me]);
+  return '<p class="hint" style="margin:var(--sp-3) 0 0">Opened from the house <strong>' + esc(h.name) + '</strong>'
+    + (mine ? ' — your points tonight count on its <button type="button" class="link" data-house-board="' + esc(h.id) + '">leaderboard</button>.'
+            : ' — members’ points count on its leaderboard.') + '</p>';
+}
+
+/* The board keeper. Runs on every room and roster snapshot; only the
+   chosen recorder writes, one transaction at a time, and the tally itself
+   is idempotent, so a lost or doubled run costs nothing. */
+let tallyInFlight = false;
+function houseTick() {
+  if (!room || !room.house || !me || tallyInFlight) return;
+  if (!demoOn && !signedInHere()) return;
+  const h = houses[room.house];
+  if (!h || !h.members[me]) return;
+  if (houseRecorder(players, room.host, h.members, now()) !== me) return;
+  const code = local.code, scores = room.scores, exp = room.expiresAt;
+  if (!houseTally(h, code, scores, exp)) return;
+  tallyInFlight = true;
+  transport().tallyHouse(h.id, (fresh) => houseTally(fresh, code, scores, exp))
+    .catch((e) => console.warn('house tally', e))
+    .finally(() => { tallyInFlight = false; });
+}
+
+/* Becoming another account (M6): leave the room as this one, keep its code,
+   and let afterAuth() rejoin as the next uid. */
+async function switchAway() {
+  if (!room || demoOn) return;
+  await leaveRoom(null, { switching: true });
+}
+function askSignOut() {
+  const words = room && !demoOn
+    ? 'Sign out of Google? You will leave this room and come straight back in as a guest; your houses stay with the account.'
+    : 'Sign out of Google? Your houses stay with the account — sign in again to see them.';
+  if (!confirm(words)) return;
+  window.brCloud.signOut().catch((e) => { console.warn('sign out', e); toast('Could not sign out — try again'); });
+}
+
+async function doCreateHouse() {
+  const name = cleanHouseName($('houseName').value);
+  const nick = houseNick();
+  const w = $('houseWarn');
+  if (!name) { w.textContent = 'Give the house a name first.'; $('houseName').focus(); return; }
+  if (!nick) { w.textContent = 'Pick a nickname first — it is what the house calls you.'; $('nickBox').focus(); return; }
+  if (userDoc.houses.length >= HOUSES_MAX) { w.textContent = 'An account can belong to ' + HOUSES_MAX + ' houses at most — leave one first.'; return; }
+  $('houseCreateBtn').disabled = true;
+  try {
+    const id = await window.brCloud.createHouse(name, nick);
+    $('houseName').value = ''; w.textContent = '';
+    toast('The house is open — its code is ' + id);
+  } catch (e) { console.warn('create house', e); w.textContent = 'The house could not be started: ' + describeCloudError(e) + '.'; }
+  finally { $('houseCreateBtn').disabled = false; }
+}
+async function doJoinHouse(id) {
+  const w = $('houseWarn');
+  const nick = houseNick();
+  if (!HOUSE_RE.test(id)) { w.textContent = 'A house code is eight letters or numbers.'; return; }
+  if (!nick) { w.textContent = 'Pick a nickname first — it is what the house calls you.'; $('nickBox').focus(); return; }
+  if (userDoc.houses.some((h) => h.id === id)) { w.textContent = ''; openHouse(id); return; }
+  if (userDoc.houses.length >= HOUSES_MAX) { w.textContent = 'An account can belong to ' + HOUSES_MAX + ' houses at most — leave one first.'; return; }
+  $('houseJoinBtn').disabled = true;
+  try {
+    const r = await window.brCloud.joinHouse(id, nick);
+    if (r === 'joined') { $('houseCode').value = ''; w.textContent = ''; toast('You’re in the house'); }
+    else w.textContent = r === 'not-found' ? 'No house has the code ' + id + '.' : 'That house could not be joined — it may be full.';
+  } catch (e) { console.warn('join house', e); w.textContent = 'Could not join: ' + describeCloudError(e) + '.'; }
+  finally { $('houseJoinBtn').disabled = false; }
+}
+/* Arriving by a house link: joined as soon as there is an account to join
+   with; until then the Houses card says what the link was for. */
+function houseArrive() {
+  if (!houseArrival || !signedInHere()) return;
+  const id = houseArrival; houseArrival = null;
+  $('houseWarn').textContent = '';
+  doJoinHouse(id);
+}
+async function doOpenHouse(id) {
+  const nick = houseNick();
+  const w = $('houseWarn');
+  if (!nick) { w.textContent = 'Pick a nickname first.'; $('nickBox').focus(); return; }
+  try {
+    const r = await window.brCloud.openHouseRoom(id, nick);
+    if (!r.code) { w.textContent = 'That house no longer exists.'; return; }
+    if (r.created) { enterRoom(r.code); rememberNick(nick); toast('Tonight’s room is open — its code is ' + r.code); }
+    else await doJoin(r.code, nick);
+  } catch (e) { console.warn('open house', e); w.textContent = 'The room could not be opened: ' + describeCloudError(e) + '.'; }
+}
+
+/* The house window: its code and link, the leaderboard, the members. */
+let houseOnScreen = null;
+function openHouse(id) {
+  const h = houses[id];
+  if (!h) { toast('That house is still loading'); return; }
+  houseOnScreen = id;
+  fillHouseDialog();
+  openModal($('houseDialog'));
+}
+function fillHouseDialog() {
+  const h = houses[houseOnScreen];
+  if (!h) return;
+  $('houseTitle').textContent = h.name;
+  $('houseDlgCode').textContent = h.id;
+  $('houseLink').value = houseLink(h.id);
+  const rows = boardRows(h);
+  /* Empty states don't explain why: a board with nobody on it is simply
+     not drawn, and the words say what fills it. */
+  $('houseBoard').innerHTML = rows.length
+    ? '<div class="table-scroll"><table class="scores"><thead><tr><th scope="col">Player</th><th scope="col" class="num">Points</th>'
+      + '<th scope="col" class="num">Nights</th><th scope="col" class="num">Best Night</th></tr></thead><tbody>'
+      + rows.map((r, i) => '<tr' + (i === 0 && r.p > 0 ? ' class="lead"' : '') + '><th scope="row">' + esc(r.n)
+        + (r.member ? '' : ' <span class="hint">(left)</span>') + '</th><td class="num">' + r.p + '</td><td class="num">' + r.nt
+        + '</td><td class="num">' + r.b + '</td></tr>').join('')
+      + '</tbody></table></div>'
+    : '<p class="hint">Points from games played in the house’s rooms land here.</p>';
+  $('houseMembers').textContent = Object.keys(h.members).map((u) => h.members[u].nick + (u === h.owner ? ' (started it)' : '')).join(', ');
+  const owner = h.owner === me;
+  $('houseLeaveBtn').textContent = owner ? 'Delete the House' : 'Leave the House';
+  $('houseLeaveBtn').hidden = demoOn;
+}
+
+
 /* ═══════════════════════════ The demo room ════════════════════════════════
    THE SAMPLE DATA IS THE DEMO, and here the demo is a whole room: an
    in-memory transport with five invented players who answer on their own,
@@ -4389,6 +4881,21 @@ const DEMO_PLAYERS = [
   { uid: 'demoTomSteppedAway00000000', nick: 'Tom (stepped away)', hue: 4, awayMs: 10 * 60000 },
 ];
 const DEMO_ME = 'demoYouTheHost000000000000';
+/* The demo room belongs to a demo HOUSE (M6), so the house line, the
+   leaderboard window and the tally can all be seen with no account: the
+   invented players have a few nights behind them, and your points join the
+   board as you score. Memory only, like the rest of the demo. */
+const DEMO_HOUSE = 'DEMXTEAM';
+function demoHouse(nick, t) {
+  const members = {};
+  members[DEMO_ME] = { nick: nick, at: t };
+  DEMO_PLAYERS.forEach((p) => { members[p.uid] = { nick: p.nick, at: t - 30 * 86400000 }; });
+  const past = [[2210, 5, 720], [1840, 4, 610], [950, 3, 400], [1300, 4, 520]];
+  const board = {};
+  DEMO_PLAYERS.forEach((p, i) => { board[p.uid] = { n: p.nick, p: past[i][0], nt: past[i][1], b: past[i][2] }; });
+  return { owner: DEMO_PLAYERS[0].uid, rev: 1, schema: SCHEMA, name: 'The Demo House', createdAt: t - 30 * 86400000,
+           members: members, board: board, room: null, roomExp: 0, last: null };
+}
 /* What the invented players write in an icebreaker: lines that read as
    an answer to almost any prompt, and one honest-sounding set of two truths
    and a lie each — the LIE FIRST, the way a real answer travels. */
@@ -4452,6 +4959,8 @@ function doodleSegs(word) {
 }
 const demoSim = (() => {
   let simRoom = null, simPlayers = {}, simAnswers = {}, simStrokes = { seq: 0, segs: [] }, simKey = null, code = '', timers = [], lastKey = '';
+  let simHouse = null;
+  const emitHouse = () => setTimeout(() => { if (simHouse) window.brApp.onHouse(DEMO_HOUSE, JSON.parse(JSON.stringify(simHouse))); }, 0);
   const emit = () => setTimeout(() => {
     if (!simRoom) { window.brApp.onRoom(null); return; }
     window.brApp.onRoom(JSON.parse(JSON.stringify(simRoom)));
@@ -4574,7 +5083,10 @@ const demoSim = (() => {
       code = 'DEMO' + randomCode().slice(0, 2);
       const t = Date.now();
       simRoom = { host: DEMO_ME, rev: 0, schema: SCHEMA, createdAt: t, expiresAt: t + ROOM_MS,
-                  phase: 'lobby', kind: null, game: {}, scores: {}, feed: [], pack: null };
+                  phase: 'lobby', kind: null, game: {}, scores: {}, feed: [], pack: null, house: DEMO_HOUSE };
+      simHouse = demoHouse(nick, t);
+      simHouse.room = code; simHouse.roomExp = simRoom.expiresAt;
+      emitHouse();
       simPlayers = {};
       simPlayers[DEMO_ME] = { nick: nick, joinedAt: t, seenAt: t, ansR: 0, hue: 0 };
       DEMO_PLAYERS.forEach((p, i) => { simPlayers[p.uid] = { nick: p.nick, joinedAt: t + 1000 * (i + 1), seenAt: t - p.awayMs, ansR: 0, hue: p.hue }; });
@@ -4583,7 +5095,7 @@ const demoSim = (() => {
     },
     join: async () => 'not-found',
     listen: () => emit(),
-    stop: () => { stopTimers(); simRoom = null; simPlayers = {}; simAnswers = {}; simStrokes = { seq: 0, segs: [] }; simKey = null; lastKey = ''; },
+    stop: () => { stopTimers(); simRoom = null; simHouse = null; simPlayers = {}; simAnswers = {}; simStrokes = { seq: 0, segs: [] }; simKey = null; lastKey = ''; },
     push: async (patch) => {
       if (!simRoom) throw Object.assign(new Error('gone'), { code: 'br/gone' });
       const rev = applyPatch(patch);
@@ -4627,7 +5139,18 @@ const demoSim = (() => {
     heartbeat: async () => { if (simPlayers[DEMO_ME]) simPlayers[DEMO_ME].seenAt = Date.now(); emit(); },
     claimHost: async () => {},
     extend: async (ms) => { simRoom.expiresAt = ms; simRoom.rev += 1; emit(); return simRoom.rev; },
-    leave: async () => { stopTimers(); simRoom = null; },
+    leave: async () => { stopTimers(); simRoom = null; simHouse = null; },
+    /* The same contract as the cloud's: the app's pure tally, run on the
+       house as it stands. */
+    tallyHouse: async (id, fn) => {
+      if (!simHouse || id !== DEMO_HOUSE) return false;
+      const patch = fn(normalizeHouse(simHouse, DEMO_HOUSE));
+      if (!patch) return false;
+      Object.assign(simHouse, JSON.parse(JSON.stringify(patch)));
+      simHouse.rev += 1;
+      emitHouse();
+      return true;
+    },
   };
 })();
 async function startDemo() {
@@ -5029,6 +5552,48 @@ $('inviteCloseBtn').addEventListener('click', () => $('inviteDialog').close());
 closeOnBackdropClick($('inviteDialog'));
 $('joinCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('joinBtn').click(); } });
 $('nickBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('createBtn').click(); } });
+/* ── The houses' controls (M6) ───────────────────────────────────────────── */
+$('houseSignInBtn').addEventListener('click', () => {
+  /* Not awaited, and nothing awaited before it: the popup must open inside
+     this press (the module's requireSignIn says why). */
+  if (window.brCloud && window.brCloud.signIn) window.brCloud.signIn();
+});
+$('houseCreateBtn').addEventListener('click', doCreateHouse);
+$('houseJoinBtn').addEventListener('click', () => doJoinHouse(cleanCode($('houseCode').value)));
+$('houseName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('houseCreateBtn').click(); } });
+$('houseCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('houseJoinBtn').click(); } });
+$('houseList').addEventListener('click', (e) => {
+  const o = e.target.closest('[data-house-open]');
+  if (o) { o.disabled = true; doOpenHouse(o.getAttribute('data-house-open')).finally(() => { o.disabled = false; }); }
+});
+/* The Leaderboard buttons live on the home card AND on the room card. */
+document.addEventListener('click', (e) => {
+  const b = e.target.closest ? e.target.closest('[data-house-board]') : null;
+  if (b) openHouse(b.getAttribute('data-house-board'));
+});
+$('houseCopyBtn').addEventListener('click', async () => {
+  const v = $('houseLink').value;
+  try { await navigator.clipboard.writeText(v); toast('Link copied'); }
+  catch (e) { $('houseLink').select(); toast('Press ⌘C to copy'); }
+});
+$('houseLeaveBtn').addEventListener('click', async () => {
+  const h = houses[houseOnScreen];
+  if (!h || demoOn) return;
+  const owner = h.owner === me;
+  const words = owner
+    ? 'Delete the house “' + h.name + '”? Its leaderboard goes with it, for every member, and cannot be brought back.'
+    : 'Leave the house “' + h.name + '”? Your row stays on its leaderboard; you can join again with its code.';
+  if (!confirm(words)) return;
+  try {
+    if (owner) await window.brCloud.deleteHouse(h.id); else await window.brCloud.leaveHouse(h.id);
+    $('houseDialog').close();
+    toast(owner ? 'The house is deleted' : 'You have left the house');
+  } catch (e) { console.warn('leave house', e); toast(describeCloudError(e)); }
+});
+$('houseCloseBtn').addEventListener('click', () => $('houseDialog').close());
+closeOnBackdropClick($('houseDialog'));
+$('houseDialog').addEventListener('close', () => { houseOnScreen = null; });
+
 $('recentWrap').addEventListener('click', (e) => {
   const b = e.target.closest('[data-rejoin]');
   if (!b) return;
@@ -5054,6 +5619,11 @@ const HELP = {
     <p><strong>Icebreakers</strong> have no speed bonus. Guessing who wrote an answer, or spotting the lie, is <strong>50 points</strong>, and the author earns <strong>25 for every player they fooled</strong>. In Best Answer, every vote your answer gets is <strong>100 points</strong>; nobody can vote for their own.</p>
     <p><strong>Codenames</strong> is a team game: when a team wins — every one of its words found, or the other team turned over the assassin — <strong>everyone on it scores 100</strong>, spymaster included. The losing team scores nothing and loses nothing.</p>
     <p>Timing is measured by the <strong>server’s clock</strong> on both ends — when the question opened and when your answer landed — never by your own computer’s, so a slow laptop clock cannot help or hurt. Points <strong>carry across games</strong> for the whole night; someone who joins late starts on nought.</p>`],
+  house: ['What a House Is', `<p>A <strong>house</strong> is a standing room for a group that meets again. It has an <strong>eight-letter code</strong> (a room’s is six, so the two are never confused), and anyone signed in with Google who has the code can join it.</p>
+    <p>Any member can <strong>open tonight’s room</strong> from the house; everyone else in the house then sees it open and joins with one press. A room opened from a house is an ordinary room — guests with the room code join it without an account, as always.</p>
+    <p>Houses need a Google account because they outlive the night; rooms never do. Signing in keeps you the same player — your seat and tonight’s points stay put.</p>`],
+  board: ['How the Leaderboard Is Counted', `<p>Every point a <strong>member</strong> scores in a room opened from the house is added to their row: <strong>Points</strong> is the running total across every night, <strong>Nights</strong> the number of nights they scored in, and <strong>Best Night</strong> their highest total in one room.</p>
+    <p>Guests in a house room play and score in the room as usual, but are not on the house’s board. The board is kept by one member’s browser in the room and is <strong>counted once</strong> however many members are there. Someone who leaves the house keeps their row, marked “left”.</p>`],
 };
 const helpDialog = $('helpDialog');
 document.addEventListener('click', (e) => {
@@ -5228,6 +5798,15 @@ window.__brTestHooks = {
   DEMO_ICE_LINES: DEMO_ICE_LINES, DEMO_TRUTHS: DEMO_TRUTHS,
   __iceKey: () => iceKey, __setIceKey: (k) => { iceKey = k; }, __myIce: () => myIce, __setMyIce: (v) => { myIce = v; render(); },
   pushPatch: pushPatch,
+  HOUSE_RE: HOUSE_RE, HOUSE_LEN: HOUSE_LEN, HOUSE_NAME_MAX: HOUSE_NAME_MAX, HOUSE_MEMBERS_MAX: HOUSE_MEMBERS_MAX,
+  BOARD_MAX: BOARD_MAX, HOUSES_MAX: HOUSES_MAX, DEMO_HOUSE: DEMO_HOUSE, demoHouse: demoHouse,
+  randomHouseCode: randomHouseCode, cleanHouseName: cleanHouseName, normalizeHouse: normalizeHouse,
+  normalizeUserDoc: normalizeUserDoc, houseRoomLive: houseRoomLive, houseTally: houseTally,
+  houseRecorder: houseRecorder, boardRows: boardRows, parseHouseHash: parseHouseHash, houseLink: houseLink,
+  __setAccount: (a) => { account = { google: !!(a && a.google), name: String(a && a.name || '') }; render(); },
+  __plantUserDoc: (raw) => { userDoc = normalizeUserDoc(raw); render(); },
+  __plantHouse: (id, raw) => { houses[id] = raw ? normalizeHouse(raw, id) : null; render(); },
+  __houses: () => houses, openHouse: openHouse, houseTick: houseTick,
   CN_WORDS: CN_WORDS, CN_CARDS: CN_CARDS, CN_MIN: CN_MIN, CN_WIN_PTS: CN_WIN_PTS, CN_KEY_WAIT_MS: CN_KEY_WAIT_MS, CN_CLUE_MAX: CN_CLUE_MAX,
   cnTeams: cnTeams, cnDeal: cnDeal, cnLeft: cnLeft, cnSpies: cnSpies, cnCleanClue: cnCleanClue, cnClueClash: cnClueClash,
   cnParseClue: cnParseClue, cnPickValid: cnPickValid, DEMO_CN_CLUES: DEMO_CN_CLUES, fmtClock: fmtClock,
@@ -5276,8 +5855,22 @@ const FIREBASE_CONFIG = {
   appId: "1:168957055210:web:5f0a8dab2bd3bb5125c793"
 };
 
+/* ⚠️ NOT part of FIREBASE_CONFIG and not derivable from it: Google Cloud
+   Console → APIs & Services → Credentials → "Web client (auto created by
+   Google Service)" — it exists once the Google provider is enabled in
+   Firebase Authentication — whose Authorized JavaScript origins must list
+   https://eagleadams86.github.io and http://localhost:8026 (exact, port
+   included) or Google refuses with origin_mismatch. Sign-in goes through
+   Google Identity Services rather than Firebase's hosted popup, because the
+   corporate filter blocks firebaseapp.com hostnames (the family's GIS flow,
+   League Night's code). While it is null the Sign In button says sign-in is
+   not set up, and nothing else changes: rooms stay anonymous. */
+const GOOGLE_CLIENT_ID = null;
+
 const SDK = 'https://www.gstatic.com/firebasejs/12.18.0/';
+const GIS = 'https://accounts.google.com/gsi/client';
 const privacyNote = document.getElementById('privacyNote');
+const acctBtn = document.getElementById('syncBtn');
 
 /* The harness boots this page in a frame, and the suite must never reach the
    cloud; a halted page must not either. Decided once, before anything loads. */
@@ -5287,6 +5880,11 @@ const cloudOn = typeof FIREBASE_CONFIG.apiKey === 'string' && FIREBASE_CONFIG.ap
 let A, F, auth, db, user = null;
 let unsubs = [], listening = null, answersUnsub = null, strokesUnsub = null, strokesFailedAt = 0, relistenTimer = null;
 let keyUnsub = null, keyFailedAt = 0;
+/* M6: Google sign-in and the houses. `tokenClient` is GIS's, created the
+   first time a sign-in door is touched; `userUnsub` follows this account's
+   own document; `houseUnsubs` one listener per house this browser shows. */
+let tokenClient = null, gisPromise = null, signInWaiters = [], initPromise = null;
+let userUnsub = null, houseUnsubs = {};
 let roomExpiresMs = 0, roomHost = null;
 /* The clock offset: Date.now() when this browser last wrote a sentinel, and
    what the server resolved it to, read back from the players listener. */
@@ -5298,6 +5896,16 @@ const playerRef = (code, uid) => F.doc(db, 'rooms', code, 'players', uid);
 const answerRef = (code, uid) => F.doc(db, 'rooms', code, 'answers', uid);
 const strokesRef = (code) => F.doc(db, 'rooms', code, 'live', 'strokes');
 const keyRef = (code) => F.doc(db, 'rooms', code, 'live', 'key');
+const userRef = (uid) => F.doc(db, 'users', uid);
+const houseRef = (id) => F.doc(db, 'houses', id);
+/* A Google account, linked onto the anonymous uid or signed in directly.
+   The rules ask the same question of the token's identities. */
+const isGoogle = (u) => !!(u && !u.isAnonymous && (u.providerData || []).some((p) => p.providerId === 'google.com'));
+function accountOf(u) {
+  if (!isGoogle(u)) return { google: false, name: '' };
+  const raw = String(u.displayName || u.email || 'Signed in').trim();
+  return { google: true, name: raw.split(/[\s@]+/)[0].slice(0, 20) || 'Signed in' };
+}
 const ts = (ms) => F.Timestamp.fromMillis(ms);
 /* A snapshot's Timestamps become milliseconds here, so the boundary in the
    classic script deals in numbers — and still accepts a Timestamp shape,
@@ -5340,16 +5948,333 @@ async function init() {
   db = F.getFirestore(app);
   A.onAuthStateChanged(auth, (u) => {
     user = u;
-    updateNote();
+    onAccount();
     if (u) window.brApp.onAuth(u.uid);
     else A.signInAnonymously(auth).catch((e) => { console.warn('anonymous sign-in', e); window.brApp.onError(e); });
   });
 }
 function updateNote() {
   if (!privacyNote) return;
-  privacyNote.textContent = user
+  privacyNote.textContent = isGoogle(user)
+    ? '🔒 Signed in with Google — your houses and their leaderboards follow this account. A room still lives in the cloud for the evening, and nobody can open it once it ends.'
+    : user
     ? '🔒 Signed in anonymously — this browser has a random id and nothing else. A room lives in the cloud for the evening, and nobody can open it once it ends.'
     : '🔒 Your nickname stays in this browser. A room lives in the cloud for the evening — anyone holding its code can see it — and nobody can open it once it ends.';
+}
+/* Every change of account — the first anonymous answer, a link, a switch,
+   a sign-out — comes through here: the note, the button, the app, and the
+   account's own document followed or dropped. */
+function onAccount() {
+  updateNote();
+  const a = accountOf(user);
+  if (acctBtn) {
+    const label = a.google ? '☁️ ' + a.name : '☁️ Sign In';
+    acctBtn.textContent = label;
+    acctBtn.setAttribute('aria-label', a.google ? 'Signed in as ' + a.name + ' — press to sign out' : 'Sign in with Google for a house');
+  }
+  window.brApp.onAccount(a);
+  if (a.google) {
+    const w = signInWaiters; signInWaiters = []; w.forEach((r) => r(user));
+    followUser();
+  } else {
+    if (userUnsub) { userUnsub(); userUnsub = null; }
+    watchHouses([]);
+    window.brApp.onUserDoc(null);
+  }
+}
+
+/* ── Google sign-in (M6): the family's GIS flow, League Night's code ────────
+   The popup opens straight onto accounts.google.com — never firebaseapp.com,
+   which the corporate filter blocks — and hands back an access token that
+   Firebase exchanges for a credential. THREE RULES, each paid for once:
+   every control that can start a sign-in is in SIGNIN_DOORS and warms GIS on
+   the events that fire BEFORE its click; the warm path reaches
+   requestAccessToken() with no `await` in front of it; and
+   popupIsAffordable() asks for a second press rather than opening a window
+   that cannot come back (iOS opens it as a severed tab). Google's code is
+   fetched only when a reader reaches for a door — never on an ordinary
+   visit — which is what privacy.html promises. Firebase itself is already
+   loaded here (the anonymous sign-in), so only GIS needs warming. */
+const SIGNIN_DOORS = ['syncBtn', 'houseSignInBtn'];
+function loadGis() {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) return resolve();
+    const s = document.createElement('script');
+    s.src = GIS; s.async = true; s.defer = true;
+    s.onload = () => (window.google && window.google.accounts && window.google.accounts.oauth2) ? resolve() : reject(new Error('Google sign-in client loaded but exposed no oauth2 API'));
+    s.onerror = () => reject(new Error('Could not load Google sign-in client'));
+    document.head.appendChild(s);
+  });
+}
+function warmGis() {
+  if (!GOOGLE_CLIENT_ID) return Promise.resolve();
+  if (!gisPromise) gisPromise = Promise.all([initPromise, loadGis()]).then(() => {
+    tokenClient = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'openid email profile',
+      callback: (resp) => {
+        if (!resp || !resp.access_token) { onSignInFailed(resp); return; }
+        useGoogleToken(resp.access_token).catch(onSignInFailed);
+      },
+      error_callback: (err) => {
+        if (err && /popup_closed|user_cancel/.test(String(err.type))) { failWaiters(); return; }
+        onSignInFailed(err);
+      },
+    });
+  });
+  return gisPromise;
+}
+function armDoors() {
+  for (const id of SIGNIN_DOORS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    for (const ev of ['pointerenter', 'pointerdown', 'focus'])
+      el.addEventListener(ev, () => { warmGis().catch(() => { /* the click that follows reports it */ }); }, { once: true, passive: true });
+  }
+}
+/* LINK, don't sign in: Google goes onto this browser's anonymous uid, so the
+   seat in the room, the night's scores and the house membership stay one id
+   and nothing on screen moves. Only an account that already exists — signed
+   in on another browser first — refuses the link, and then this browser
+   becomes THAT account: the app leaves the room as the old uid first and
+   rejoins as the new one (brApp.beforeSwitch). onAuthStateChanged does not
+   fire for a link (same user), so onAccount() is called by hand. */
+async function useGoogleToken(token) {
+  const cred = A.GoogleAuthProvider.credential(null, token);
+  if (user && user.isAnonymous) {
+    try {
+      const r = await A.linkWithCredential(user, cred);
+      await r.user.getIdToken(true);   /* the rules read the new identities off the token */
+      user = r.user;
+      onAccount();
+      return;
+    } catch (e) {
+      if (String(e && e.code).indexOf('credential-already-in-use') === -1) throw e;
+      const again = A.GoogleAuthProvider.credentialFromError(e) || cred;
+      await window.brApp.beforeSwitch();
+      await A.signInWithCredential(auth, again);
+      return;
+    }
+  }
+  await A.signInWithCredential(auth, cred);
+}
+function failWaiters() { const w = signInWaiters; signInWaiters = []; w.forEach((r) => r(null)); }
+function onSignInFailed(e) {
+  console.warn('sign-in error', e);
+  const s = String((e && (e.type || e.code || e.message)) || e || '');
+  if (s.includes('origin_mismatch') || s.includes('idpiframe') || s.includes('invalid_client'))
+    window.toast('Sign-in rejected — this site isn’t an authorised origin for the Google client');
+  else if (s.includes('popup_failed_to_open'))
+    window.toast('Sign-in popup was blocked — allow popups for this site and try again');
+  else if (s.includes('operation-not-allowed'))
+    window.toast('Google sign-in isn’t switched on for this app’s cloud yet');
+  else window.toast('Sign-in failed — the browser console has the detail');
+  failWaiters();
+}
+/* A sign-in that does not come back says so (League Night, 2026-09-08). */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || isGoogle(user) || !signInWaiters.length) return;
+  setTimeout(() => {
+    if (isGoogle(user) || !signInWaiters.length) return;
+    window.toast('Google didn’t come back — close its tab and press Sign In again');
+  }, 3000);
+});
+function popupIsAffordable() {
+  const act = navigator.userActivation;
+  return !act || act.isActive;
+}
+/* Signs in if needed; resolves with the user, or null if they gave up. */
+async function requireSignIn() {
+  if (isGoogle(user)) return user;
+  if (!cloudOn) return null;
+  if (!GOOGLE_CLIENT_ID) { window.toast('Google sign-in isn’t set up for this copy of Break Room yet'); return null; }
+  /* NO `await` ON THE WARM PATH: it is what spends the gesture. */
+  if (!tokenClient) {
+    try { await warmGis(); } catch (e) { window.toast('Couldn’t reach Google — sign-in is unavailable right now'); return null; }
+    if (isGoogle(user)) return user;
+  }
+  if (!tokenClient) return null;
+  if (!popupIsAffordable()) { window.toast('Google is ready now — press it once more to sign in'); return null; }
+  return new Promise((resolve) => {
+    signInWaiters.push(resolve);
+    tokenClient.requestAccessToken();
+    setTimeout(() => { const i = signInWaiters.indexOf(resolve); if (i !== -1) { signInWaiters.splice(i, 1); resolve(null); } }, 120000);
+  });
+}
+/* Signing out is a switch too: the app leaves the room as this account,
+   Firebase hands back a fresh anonymous uid (onAuthStateChanged → the
+   anonymous sign-in above), and the app rejoins the room as a guest. */
+async function signOut() {
+  if (!isGoogle(user)) return;
+  await window.brApp.beforeSwitch();
+  await A.signOut(auth);
+}
+if (acctBtn) {
+  if (cloudOn) {
+    armDoors();
+    acctBtn.addEventListener('click', () => {
+      if (isGoogle(user)) { window.brApp.askSignOut(); return; }
+      requireSignIn();   /* not awaited: nothing here needs the answer */
+    });
+  } else {
+    /* The harness frame and a halted page: invisible, so nothing can shift. */
+    acctBtn.hidden = true;
+  }
+}
+
+/* ── This account's own document and the houses it shows ─────────────────── */
+function followUser() {
+  if (userUnsub || !user) return;
+  const uid = user.uid;
+  userUnsub = F.onSnapshot(userRef(uid), (s) => {
+    window.brApp.onUserDoc(s.exists() ? plain(s.data()) : null);
+  }, (e) => { console.warn('user doc', e); if (userUnsub) { userUnsub(); userUnsub = null; } });
+}
+/* One listener per house the app asks for — the account's houses on the
+   home card, plus the house of the room on screen. A refused or missing
+   house reports null, which is how a deleted house leaves the list. */
+function watchHouses(ids) {
+  const want = new Set(isGoogle(user) ? (ids || []) : []);
+  Object.keys(houseUnsubs).forEach((id) => { if (!want.has(id)) { houseUnsubs[id](); delete houseUnsubs[id]; } });
+  want.forEach((id) => {
+    if (houseUnsubs[id]) return;
+    houseUnsubs[id] = F.onSnapshot(houseRef(id), (s) => {
+      if (s.metadata.hasPendingWrites) return;
+      window.brApp.onHouse(id, s.exists() ? plain(s.data()) : null);
+    }, (e) => {
+      console.warn('house', e);
+      if (houseUnsubs[id]) { houseUnsubs[id](); delete houseUnsubs[id]; }
+      window.brApp.onHouse(id, null);
+    });
+  });
+}
+function needGoogle() { if (!isGoogle(user)) throw Object.assign(new Error('not signed in with Google'), { code: 'br/no-account' }); }
+/* The account's list of houses. EVERY write to users/{uid} merges (memory:
+   setDoc replaces a document), and the list is read-modify-written inside a
+   transaction so two tabs adding houses cannot drop each other's. */
+async function updateUser(fn) {
+  needGoogle();
+  const ref = userRef(user.uid);
+  await F.runTransaction(db, async (tx) => {
+    const s = await tx.get(ref);
+    const cur = window.brApp.normalizeUserDoc(s.exists() ? plain(s.data()) : null);
+    const next = fn(cur);
+    tx.set(ref, { nick: next.nick, houses: next.houses, schema: window.brApp.schema }, { merge: true });
+  });
+}
+async function saveNick(nick) {
+  if (!isGoogle(user)) return;
+  await updateUser((u) => Object.assign(u, { nick: nick }));
+}
+const addHouseToUser = (id, name) => updateUser((u) => {
+  u.houses = [{ id: id, name: name }].concat(u.houses.filter((h) => h.id !== id)).slice(0, 20);
+  return u;
+});
+const dropHouseFromUser = (id) => updateUser((u) => { u.houses = u.houses.filter((h) => h.id !== id); return u; });
+
+/* A new house, with this account as its owner and only member. A plain
+   setDoc, like a room: a code already in use is an UPDATE the rules refuse
+   (rev 0 is never old + 1), so a collision is a permission-denied and the
+   next code is tried. */
+async function createHouse(name, nick) {
+  needGoogle();
+  let id = '';
+  for (let i = 0; i < 5; i++) {
+    id = window.brApp.randomHouseCode();
+    try {
+      await F.setDoc(houseRef(id), { owner: user.uid, rev: 0, schema: window.brApp.schema, name: name,
+        createdAt: Date.now(), members: { [user.uid]: { nick: nick, at: Date.now() } }, board: {},
+        room: null, roomExp: 0, last: null });
+      break;
+    } catch (e) {
+      if (i === 4 || String(e && e.code).indexOf('permission-denied') === -1) throw e;
+    }
+  }
+  await addHouseToUser(id, name);
+  return id;
+}
+/* Joining writes ONE key into `members` — my own — which is the whole of
+   what the rules let somebody who is not yet a member change. */
+async function joinHouse(id, nick) {
+  needGoogle();
+  let name = '';
+  try {
+    const found = await F.runTransaction(db, async (tx) => {
+      const s = await tx.get(houseRef(id));
+      if (!s.exists()) return false;
+      const d = s.data();
+      name = String(d.name || '');
+      const m = Object.assign({}, d.members || {});
+      m[user.uid] = { nick: nick, at: m[user.uid] && m[user.uid].at ? m[user.uid].at : Date.now() };
+      tx.update(houseRef(id), { members: m, rev: (Number(d.rev) || 0) + 1 });
+      return true;
+    });
+    if (!found) return 'not-found';
+  } catch (e) {
+    if (String(e && e.code).indexOf('permission-denied') !== -1) return 'refused';
+    throw e;
+  }
+  await addHouseToUser(id, name);
+  return 'joined';
+}
+async function leaveHouse(id) {
+  needGoogle();
+  await F.runTransaction(db, async (tx) => {
+    const s = await tx.get(houseRef(id));
+    if (!s.exists()) return;
+    const d = s.data();
+    const m = Object.assign({}, d.members || {});
+    delete m[user.uid];
+    tx.update(houseRef(id), { members: m, rev: (Number(d.rev) || 0) + 1 });
+  });
+  await dropHouseFromUser(id);
+}
+async function deleteHouse(id) {
+  needGoogle();
+  await F.deleteDoc(houseRef(id));
+  await dropHouseFromUser(id);
+}
+/* Tonight's room for a house: the one it already has open, or a new room
+   opened for it. Two members pressing at once each open a room; the house's
+   transaction lets the FIRST stand and the second closes its own and joins
+   the first, so a house never has two rooms on one night. */
+async function openHouseRoom(id, nick) {
+  needGoogle();
+  const s = await F.getDoc(houseRef(id));
+  if (!s.exists()) return { code: null };
+  const d = plain(s.data());
+  if (d.room && Number(d.roomExp) > Date.now()) return { code: d.room, created: false };
+  const code = await create(nick, id);
+  let other = null;
+  await F.runTransaction(db, async (tx) => {
+    const t = await tx.get(houseRef(id));
+    if (!t.exists()) return;
+    const h = plain(t.data());
+    if (h.room && h.room !== code && Number(h.roomExp) > Date.now()) { other = h.room; return; }
+    tx.update(houseRef(id), { room: code, roomExp: roomExpiresMs, rev: (Number(h.rev) || 0) + 1 });
+  });
+  if (other) {
+    listening = code;
+    await leave({ closeRoom: true });
+    listening = null;
+    return { code: other, created: false };
+  }
+  return { code: code, created: true };
+}
+/* The leaderboard: `fn` is the app's PURE houseTally, run on the house as
+   the transaction read it, so the difference is worked out against the
+   latest board and a retry can never count a game twice. */
+async function tallyHouse(id, fn) {
+  needGoogle();
+  return F.runTransaction(db, async (tx) => {
+    const s = await tx.get(houseRef(id));
+    if (!s.exists()) return false;
+    const raw = plain(s.data());
+    const patch = fn(window.brApp.normalizeHouse(raw, id));
+    if (!patch) return false;
+    tx.update(houseRef(id), Object.assign(JSON.parse(JSON.stringify(patch)), { rev: (Number(raw.rev) || 0) + 1 }));
+    return true;
+  });
 }
 
 /* ── Listening to the room on screen ───────────────────────────────────────── */
@@ -5460,7 +6385,7 @@ function playerDoc(nick, joinedAt, hue) {
   sentAt = Date.now();
   return { nick: nick, joinedAt: joinedAt, seenAt: F.serverTimestamp(), ansR: 0, hue: hue, expiresAt: ts(roomExpiresMs) };
 }
-async function create(nick) {
+async function create(nick, house) {
   needUser();
   const t = Date.now();
   roomExpiresMs = t + 6 * 3600000;
@@ -5472,8 +6397,12 @@ async function create(nick) {
   for (let i = 0; i < 5; i++) {
     code = window.brApp.randomCode();
     try {
-      await F.setDoc(roomRef(code), { host: user.uid, rev: 0, schema: window.brApp.schema, createdAt: t,
-        expiresAt: ts(roomExpiresMs), phase: 'lobby', kind: null, game: {}, scores: {}, feed: [] });
+      /* `house` only when there is one: a room without the key is valid
+         under every version of the rules. */
+      const doc = { host: user.uid, rev: 0, schema: window.brApp.schema, createdAt: t,
+        expiresAt: ts(roomExpiresMs), phase: 'lobby', kind: null, game: {}, scores: {}, feed: [] };
+      if (house) doc.house = house;
+      await F.setDoc(roomRef(code), doc);
       break;
     } catch (e) {
       if (i === 4 || String(e && e.code).indexOf('permission-denied') === -1) throw e;
@@ -5591,10 +6520,15 @@ window.brCloud = {
   strokes: strokes, clearStrokes: clearStrokes, writeKey: writeKey,
   claimHost: claimHost, extend: extend, leave: leave,
   listen: listenTo, stop: stopListening,
+  /* M6 */
+  google: () => isGoogle(user), signIn: requireSignIn, signOut: signOut, saveNick: saveNick,
+  watchHouses: watchHouses, createHouse: createHouse, joinHouse: joinHouse, leaveHouse: leaveHouse,
+  deleteHouse: deleteHouse, openHouseRoom: openHouseRoom, tallyHouse: tallyHouse,
 };
 updateNote();
 if (cloudOn) {
-  init().catch((e) => { console.warn('Cloud unavailable:', e); window.brCloud.on = false; window.brApp.onError(e); });
+  initPromise = init();
+  initPromise.catch((e) => { console.warn('Cloud unavailable:', e); window.brCloud.on = false; window.brApp.onError(e); });
 } else if (!inFrame && !window.brHalted) {
   /* The ordinary visit with the config still empty, or a halted page. Nothing
      to do; the home card has already said so. */

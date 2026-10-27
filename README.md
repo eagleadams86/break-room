@@ -3,17 +3,42 @@
 A room your team drops into beside the Teams or Zoom call you already have open. Pick a
 nickname, start a room or join one with its six-letter code, see who's around, and let the
 host run a round of trivia, a drawing game, an icebreaker or Codenames while everyone talks. No account, nothing to install, and
-nobody can open a room once it has ended.
+nobody can open a room once it has ended. Groups that meet again can sign in with Google
+for a **house**: a standing group with tonight's room one press away and a leaderboard
+across nights.
 
 **Live: https://eagleadams86.github.io/break-room/** · **Privacy:** [privacy.html](https://eagleadams86.github.io/break-room/privacy.html)
 
 Built for two groups at once — a distributed work team on corporate laptops and a friends
-group — so it never needs a Google account, never opens a video stream, and never asks for
+group — so a room never needs a Google account (only a house does), never opens a video stream, and never asks for
 anything from a work system. The plan is in
 `~/.claude/plans/there-used-to-be-flickering-lovelace.md`; `CLAUDE.md` records what this app
 decides that the rest of the family has not.
 
 ## What It Does Today
+
+**Milestone 6 — Google sign-in and houses (27 October 2026).** Optional, and only for a
+group that meets again:
+
+- **☁️ Sign In** at the left of the header (or *Sign In With Google* on the Houses card)
+  opens Google's own sign-in window straight onto `accounts.google.com` — never
+  `firebaseapp.com`, which the corporate filter blocks. Google is **linked onto the
+  anonymous player you already are**, so your seat in the room and tonight's points stay
+  put. Only an account that already exists from another browser changes who you are, and
+  then the app leaves the room and comes straight back in as that account.
+- **Start a House** with a name, or **Join a House** with its **eight-letter code** (a
+  room's is six, so the two are never confused) or its invite link
+  (`…/break-room/#house=CODE`). Your houses follow your account to any browser.
+- **Open Tonight's Room** from a house: a normal room, labelled with the house. Every other
+  member sees *Join Tonight's Room* on their Houses card. Two members pressing at once get
+  one room, not two. Guests still join with the six-letter code and no account.
+- **The leaderboard.** Every point a **member** scores in a house's room is added to their
+  row — total points, nights scored, best night — counted once however many members are in
+  the room (the tally only ever adds the difference since it last counted). Guests are not
+  on it. Leave a house and your row stays, marked "left"; the founder can delete the house.
+- **The demo room belongs to a demo house**, so the leaderboard can be seen with no account:
+  the invented players have a few nights behind them and your points join them.
+- Signing out leaves the room as your account and rejoins it as a guest.
 
 **Milestone 5 — Codenames (27 October 2026).** The team word game, played beside the call:
 
@@ -167,9 +192,9 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (202 tests as of milestone 5).
+clause by clause, and a suite with a floor (227 tests as of milestone 6).
 
-**Coming next:** last of all, Google sign-in for a standing house with a cross-night leaderboard (6).
+All six milestones of the plan are built.
 
 ## How a Room Works
 
@@ -187,9 +212,10 @@ clause by clause, and a suite with a floor (202 tests as of milestone 5).
 - **Online means "wrote in the last four minutes".** Every player's browser rewrites its
   presence record every 90 seconds, and that is what draws the dot. There is no video or
   voice: the call you are already on is the voice.
-- **Nothing identifies you across nights.** Sign-in is anonymous — Firebase hands this
-  browser a random id so it can tell your answers from the next person's — and a nickname is
-  whatever you typed for the evening.
+- **Nothing identifies you across nights — unless you sign in for a house.** Sign-in is
+  anonymous — Firebase hands this browser a random id so it can tell your answers from the
+  next person's — and a nickname is whatever you typed for the evening. A Google sign-in is
+  optional and only adds houses; rooms work the same with or without one.
 
 ## Setting Up the Cloud
 
@@ -232,6 +258,16 @@ place today.
    the boundary. *Done.*
 8. Commit `FIREBASE_CONFIG`. The family's existing API-key alerts on GitHub are closed as
    won't-fix for exactly this reason; see memory before "fixing" one. *Done.*
+9. **Google sign-in for houses (milestone 6):** Authentication → Sign-in method → **add
+   Google** (support email = the project owner's). That creates an OAuth client; in Google
+   Cloud → APIs & Services → Credentials → *Web client (auto created by Google Service)*, add
+   **Authorized JavaScript origins** `https://eagleadams86.github.io` and
+   `http://localhost:8026` — exact, port included, or Google refuses with `origin_mismatch`.
+   Copy that client's id into `GOOGLE_CLIENT_ID` in the module (while it is `null` the Sign
+   In button says sign-in isn't set up and nothing else changes). Then **re-publish
+   `firestore.rules`**: it gained the `users` and `houses` blocks and a room's optional
+   `house` label. A plain room never carries `house`, so the old rules keep working until
+   the paste. Anonymous stays ON — rooms still need it.
 
 The kill switch, if a room is ever abused: **Authentication → Sign-in method → Anonymous →
 disable.** Every door closes at once, nothing is lost, and the rules can be tightened in the
@@ -280,8 +316,13 @@ frame, and the module returns early inside a frame.
 
 - Every page ships a Content Security Policy that starts at `'none'`. The only script from
   off this origin is the Firebase SDK from `www.gstatic.com`, loaded by the module's own
-  `import()`; the page talks to three Google endpoints and nothing else, and never to
+  `import()`, and — only when a reader presses Sign In — Google Identity Services from
+  `accounts.google.com` (League Night's exact CSP line). The page never talks to
   `firebaseapp.com`. The suite pins that host list exactly.
+- A house is readable only by Google-signed accounts holding its code (`list: false`, as
+  for rooms); a non-member may write only their own entry into its members, which is
+  joining; only the founder deletes it. Removing a member is not offered: anyone with the
+  code can join again, so a house that must be closed to someone is a new house.
 - Everything rendered is escaped and every snapshot is sanitised at the boundary: a
   nickname, a question or an answer on your screen was typed in somebody else's browser.
 - Nicknames, questions and answers are the only free text, each capped in code. There is no

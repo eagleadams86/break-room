@@ -27,8 +27,8 @@ memory note `break-room-project` summarises the decisions.
   config can create rooms, bounded by the caps, the twelve-hour `expiresAt` ceiling, the TTL
   policies, a budget alert, the API key's referrer restriction (a speed bump, not a boundary)
   and the one-click kill switch of turning the Anonymous provider off. Nothing identifies a
-  person across nights, which is the privacy property v1 wants. Google sign-in is the LAST
-  milestone, for a persistent "house".
+  person across nights, which is the privacy property v1 wants. Google sign-in (M6) is
+  OPTIONAL and only for a persistent "house"; a room never needs it.
 - **The host's browser is the engine, and the only writer of the room document.** Every
   write is `runTransaction` with `rev + 1`, which the rules refuse otherwise. Players write
   only their own two documents (presence, answer). `step()` on each game is PURE — `(room,
@@ -85,6 +85,43 @@ memory note `break-room-project` summarises the decisions.
   not free; 8026 is the first past Wine Cellar's 8025.
 
 ## Status
+
+**M6 — Google sign-in and houses (2026-10-27, branch `m6-houses`).** The family's GIS flow
+(League Night's `SIGNIN_DOORS` = `syncBtn` + `houseSignInBtn`, no `await` on the warm path,
+`popupIsAffordable`), `#syncBtn` FIRST in the row at a fixed `8em` with an ellipsis,
+`users/{uid}` (self only, `{nick, houses:[{id,name}]}`, every write a merging transaction)
+and `houses/{code}` (eight characters; `{owner, rev, schema, name, createdAt, members, room,
+roomExp, board, last}`), the Houses card on the home screen, the house window (code, link,
+leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
+demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
+`google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
+**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 227.
+`GOOGLE_CLIENT_ID` is null until the console step in README step 9.
+
+**Things a tidy-up would break (M6):**
+- **Sign-in LINKS (`linkWithCredential`) onto the anonymous uid, never signs in fresh.** The
+  seat, tonight's scores and the house membership must be one uid; a fresh sign-in would
+  make the player a stranger in their own room. `onAuthStateChanged` does not fire on a
+  link, so `onAccount()` is called by hand after `getIdToken(true)` (the rules read the new
+  identities off the token). Only `credential-already-in-use` switches uid, and it calls
+  `brApp.beforeSwitch` FIRST: `leaveRoom(null, {switching: true})` hands the seat on if it
+  can, NEVER closes the room, keeps `local.code`, and `afterAuth` rejoins as the new uid (a
+  host alone: its player record goes, so the rules call it stale and the rejoin takes the
+  seat at once). Sign-out is the same switch the other way.
+- **`google()` in the rules asks `token.firebase.identities`, not `sign_in_provider`** — a
+  linked account's identities name google.com whichever way it last signed in.
+- **The house tally is idempotent by construction** (`houseTally`, pure): `last` is what
+  has been counted from `last.code`, and only the difference is added. Any member's browser
+  may run it, concurrently — `houseRecorder` picks one for tidiness, not correctness. Don't
+  replace it with "add this game's points": a retried transaction would count twice.
+- **`TALLY_CODE_RE` is a shade wider than `CODE_RE`** because the demo room's code starts
+  "DEMO" (an O no real code has). Tighten it and the demo house counts every snapshot again.
+- **`house` goes on a room only when there is one** (`if (house) doc.house = house`), so a
+  plain room is valid under the pre-M6 rules — that is what let the client ship before the
+  paste.
+- **The house sign-in button and both forms are MARKUP**, not innerHTML: the module warms
+  doors by id at load, and a redrawn button would be a cold door (the iPhone dead tab).
+- **No member removal**, on purpose (League Night's lesson): anyone with the code rejoins.
 
 **M5 — Codenames (2026-10-27).** `GAMES.codenames` — teams **Blue and Gold** (`'b'`/`'g'`,
 the pack's `--series-1`/`--series-2`; never red/green, and every coloured card names its
@@ -308,10 +345,10 @@ Firebase console steps are a numbered checklist in the README and need Charles.
   fails the build on purpose. Tests refuse to run off localhost. Run them headless with
   Playwright (the Browser pane throttles a hidden tab's timers); see `running-the-suites`
   in memory.
-- A new field on a room, a player or an answer goes into the matching `normalize*`
+- A new field on a room, a player, an answer or a house goes into the matching `normalize*`
   allowlist, into `firestore.rules`, AND bumps `SCHEMA` in the same commit, or the boundary
   strips it and the rules refuse it.
-- Nicknames (20), questions (160), answers (60 × 4), drawing guesses (40), icebreaker
+- Nicknames (20), house names (30), questions (160), answers (60 × 4), drawing guesses (40), icebreaker
   answers (120, or 60 × 3 for two truths) and Codenames clues (one word, 24) are the only free text, capped in code; guesses and answers live only for the round; **there is no notes field anywhere, and
   none is to be added.**
 - Escape everything rendered with `esc()`. Every nickname, question and answer on screen

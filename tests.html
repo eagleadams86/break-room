@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 202;
+const EXPECTED = 227;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -430,20 +430,20 @@ function define() {
   });
 
   group('the page is on the shared origin, and behaves like it');
-  t('the CSP names exactly the Firebase SDK and its three endpoints, and nothing else', () => {
-    /* League Night's line without accounts.google.com and without frame-src:
-       nothing on firebaseapp.com (the corporate filter blocks it, and anonymous
-       sign-in never needs it), and nothing from Google's sign-in until the last
-       milestone. A new endpoint fails HERE before it ships. */
+  t('the CSP names exactly the Firebase SDK, its endpoints and Google sign-in, and nothing else', () => {
+    /* League Night's line exactly (M6): Google Identity Services for script,
+       connect and frame, www.googleapis.com for the credential exchange, and
+       nothing on firebaseapp.com — the corporate filter blocks it, and the
+       GIS flow never needs it. A new endpoint fails HERE before it ships. */
     const csp = (APP_SRC.match(/Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
     ok(csp, 'there must be a CSP meta tag — Pages cannot send headers');
     ok(/default-src 'none'/.test(csp), 'it starts at none');
-    eq((csp.match(/https?:\/\/[^\s;']+/g) || []).sort(),
-       ['https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com',
-        'https://securetoken.googleapis.com', 'https://www.gstatic.com'],
+    eq([...new Set(csp.match(/https?:\/\/[^\s;']+/g) || [])].sort(),
+       ['https://accounts.google.com', 'https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com',
+        'https://securetoken.googleapis.com', 'https://www.googleapis.com', 'https://www.gstatic.com'],
        'the host list is pinned exactly');
-    ok(/script-src 'self' 'unsafe-inline' https:\/\/www\.gstatic\.com;/.test(csp), 'gstatic is the only script host');
-    ok(!/frame-src/.test(csp), 'no frames until Google sign-in arrives');
+    ok(/script-src 'self' 'unsafe-inline' https:\/\/www\.gstatic\.com https:\/\/accounts\.google\.com;/.test(csp), 'gstatic and Google sign-in are the only script hosts');
+    ok(/frame-src https:\/\/accounts\.google\.com;/.test(csp), 'the only frame is Google sign-in');
     ok((csp.match(/https?:\/\/[^\s;']+/g) || []).every((h) => !/\.firebaseapp\.com$/.test(h)), 'and never the hostname the corporate filter blocks');
   });
   t('manifest-src and worker-src are spelled out, not left to fall back', () => {
@@ -534,7 +534,7 @@ function define() {
   group('a room arriving from another browser is a hostile backup');
   t('normalizeRoom strips unknown keys and rebuilds every field', () => {
     const r = H.normalizeRoom(Object.assign(fixtureRoom(), { secret: 1, phase: 'bogus', kind: 'poker', rev: '7', scores: { [U.b]: '12' } }));
-    eq(Object.keys(r).sort(), ['createdAt', 'expiresAt', 'feed', 'game', 'host', 'kind', 'pack', 'phase', 'rev', 'schema', 'scores'],
+    eq(Object.keys(r).sort(), ['createdAt', 'expiresAt', 'feed', 'game', 'host', 'house', 'kind', 'pack', 'phase', 'rev', 'schema', 'scores'],
        'a new room field must be added to normalizeRoom, to validRoom in firestore.rules AND bump SCHEMA');
     eq(r.phase, 'lobby', 'an unknown phase is the lobby');
     eq(r.kind, null, 'an unknown game is no game');
@@ -1285,7 +1285,7 @@ function define() {
   });
   t('leaving as the host hands the room on, or closes it when alone', () => {
     const src = stripComments(APP_SRC);
-    ok(/handTo = nextHost\(others, now\(\)\);\s*closeRoom = !handTo;/.test(src), 'the next online player, else close');
+    ok(/handTo = nextHost\(others, now\(\)\);\s*closeRoom = !handTo && !switching;/.test(src), 'the next online player, else close — unless this browser is only switching accounts');
     const mod = (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
     ok(/if \(o\.handTo\) \{ try \{ await push\(\{ host: o\.handTo \}\); \}/.test(mod), 'the module pushes the handoff first');
     ok(/if \(o\.closeRoom\) \{ try \{ await F\.deleteDoc\(roomRef\(code\)\); \}/.test(mod), 'and deletes the room when told to');
@@ -2458,9 +2458,307 @@ function define() {
   t('the demo’s spymasters give clues the engine accepts, and the schema moved', () => {
     const g = H.normalizeRoom(cnRoom()).game;
     H.DEMO_CN_CLUES.forEach((w) => ok(!!H.cnParseClue('C|' + w + '|2', g), w));
-    eq(H.SCHEMA, 4, 'an M4 page halts on a Codenames room rather than host a game it cannot run');
+    ok(H.SCHEMA >= 4, 'an M4 page halts on a Codenames room rather than host a game it cannot run');
     eq(H.fmtClock(65000), '1:05');
     eq(H.fmtClock(-1), '0:00');
+  });
+
+  /* ═══════════════════════ M6: Google sign-in and houses ═══════════════════ */
+  const HID = 'HSEAAAAA';   /* a house code: eight from the alphabet */
+  function fixtureHouse(over) {
+    return Object.assign({
+      owner: U.host, rev: 4, schema: 5, name: 'Friday Quiz', createdAt: T0 - 86400000,
+      members: { [U.host]: { nick: 'Ada', at: T0 - 86400000 }, [U.b]: { nick: 'Ben', at: T0 - 3600000 } },
+      board: { [U.b]: { n: 'Ben', p: 300, nt: 2, b: 200 } },
+      room: null, roomExp: 0, last: null,
+    }, over || {});
+  }
+  const houseDone = () => { H.__setAccount(null); H.__plantUserDoc(null); H.__plantHouse(HID, null); H.__plantRoom(null); H.__setMe(null); H.__setOffset(0); };
+
+  group('houses: codes, links and the boundary');
+  t('a house code is eight letters, never a room code, and is random', () => {
+    const a = H.randomHouseCode(), b = H.randomHouseCode();
+    ok(H.HOUSE_RE.test(a) && H.HOUSE_RE.test(b), 'from the room-code alphabet', a + ' ' + b);
+    ok(a !== b, 'two in a row differ');
+    eq(H.HOUSE_LEN, 8);
+    ok(!H.CODE_RE.test(a) && !H.HOUSE_RE.test(H.randomCode()), 'a house code cannot be read as a room code, or the other way round');
+  });
+  t('a house link is read leniently, with a boundary on both sides, and never as a join link', () => {
+    eq(H.parseHouseHash('#house=HSEAAAAA'), HID);
+    eq(H.parseHouseHash('#house=hseaaaaa%20see%20you'), HID, 'lower case and whatever a mail client tacked on');
+    eq(H.parseHouseHash('#house=HSEAAAAAB'), null, 'nine letters are not a house');
+    eq(H.parseHouseHash('#join=ABCDEF'), null, 'a join link is not a house link');
+    eq(H.parseJoinHash('#house=HSEAAAAA'), null, 'and a house link is not a join link');
+    ok(/#house=HSEAAAAA$/.test(H.houseLink(HID)), 'the link the house window offers');
+    const src = stripComments(APP_SRC);
+    ok(/let houseArrival = parseHouseHash\(location\.hash\);\s*if \(houseArrival\) \{\s*try \{ history\.replaceState/.test(src), 'and the code is taken off the address at once');
+  });
+  t('a house from another browser is rebuilt, not merged', () => {
+    const h = H.normalizeHouse(fixtureHouse({ evil: 1, name: '  A very long house name that goes on and on  ',
+      members: { [U.host]: { nick: 'Ada', at: 1, x: 1 }, 'bad uid!': { nick: 'Mallory' } },
+      board: { [U.b]: { n: 'Ben', p: -5, nt: 'x', b: 2e12 }, '../x': { n: 'z', p: 1 } },
+      room: 'abcdef', last: { code: 'ZZZZZZ', s: { [U.b]: 100, 'no!': 5 }, junk: 1 } }), HID);
+    eq(Object.keys(h).sort(), ['board', 'createdAt', 'id', 'last', 'members', 'name', 'owner', 'rev', 'room', 'roomExp', 'schema'],
+       'a new house field must be added to normalizeHouse, to validHouse in firestore.rules AND bump SCHEMA');
+    eq(h.name.length, H.HOUSE_NAME_MAX, 'the name is sliced to its cap');
+    eq(Object.keys(h.members), [U.host], 'a member whose uid fails ID_RE is dropped');
+    eq(Object.keys(h.members[U.host]).sort(), ['at', 'nick']);
+    eq(h.board[U.b], { n: 'Ben', p: 0, nt: 0, b: 1e9 }, 'numbers clamped, never negative');
+    eq(Object.keys(h.board), [U.b]);
+    eq(h.room, 'ABCDEF');
+    eq(h.last, { code: 'ZZZZZZ', s: { [U.b]: 100 } });
+    eq(H.normalizeHouse(fixtureHouse(), 'nope'), null, 'a bad id is no house');
+    eq(H.normalizeHouse(fixtureHouse({ owner: 'x y' }), HID), null, 'nor is a bad owner');
+    const many = {}; for (let i = 0; i < 40; i++) many['u' + i] = { nick: 'n' + i };
+    eq(Object.keys(H.normalizeHouse(fixtureHouse({ members: many }), HID).members).length, H.HOUSE_MEMBERS_MAX, 'members capped');
+  });
+  t('the account’s own document keeps houses and a nickname, capped and de-duplicated', () => {
+    const list = [{ id: HID, name: 'One' }, { id: HID, name: 'Dup' }, { id: 'short', name: 'x' }];
+    for (let i = 0; i < 30; i++) list.push({ id: 'HSEB' + 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[i] + 'AAA', name: 'n' });
+    const u = H.normalizeUserDoc({ nick: 'A name far longer than twenty', houses: list, extra: 1 });
+    eq(Object.keys(u).sort(), ['houses', 'nick']);
+    eq(u.nick.length, H.NICK_MAX);
+    eq(u.houses.length, H.HOUSES_MAX, 'twenty houses at most');
+    eq(u.houses[0], { id: HID, name: 'One' }, 'the first copy of a house wins');
+    eq(H.normalizeUserDoc(null), { nick: '', houses: [] });
+  });
+  t('a room keeps the house it was opened for, and drops one that is not a house', () => {
+    eq(H.normalizeRoom(fixtureRoom({ house: HID })).house, HID);
+    eq(H.normalizeRoom(fixtureRoom({ house: 'ABCDEF' })).house, null, 'a room code is not a house');
+    eq(H.normalizeRoom(fixtureRoom()).house, null);
+    ok(H.SCHEMA >= 5, 'a room carrying `house` halts an M5 page rather than have its host strip the field');
+  });
+  t('every house cap mirrors a line in firestore.rules', () => {
+    const r = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(new RegExp('d\\.name\\.size\\(\\) <= ' + H.HOUSE_NAME_MAX).test(r), 'name ' + H.HOUSE_NAME_MAX);
+    ok(new RegExp('d\\.members\\.size\\(\\) <= ' + H.HOUSE_MEMBERS_MAX).test(r), 'members ' + H.HOUSE_MEMBERS_MAX);
+    ok(new RegExp('d\\.board\\.size\\(\\) <= ' + H.BOARD_MAX).test(r), 'board ' + H.BOARD_MAX);
+    ok(new RegExp('d\\.houses\\.size\\(\\) <= ' + H.HOUSES_MAX).test(r), 'houses ' + H.HOUSES_MAX);
+    ok(new RegExp('d\\.house\\.size\\(\\) == ' + H.HOUSE_LEN).test(r), 'a room’s house label is ' + H.HOUSE_LEN);
+    ok(new RegExp('d\\.last\\.s\\.size\\(\\) <= ' + H.PLAYERS_MAX).test(r), 'what was counted from a room is one per player');
+    ok(/'pack', 'house'\]\)/.test(r), 'validRoom allows `house`');
+  });
+
+  group('houses: the leaderboard tally is pure and counts once');
+  t('a member’s points go on the board, and running it again counts nothing', () => {
+    const h = H.normalizeHouse(fixtureHouse({ room: 'RMABCD', roomExp: T0 }), HID);
+    const p = H.houseTally(h, 'RMABCD', { [U.host]: 150, [U.b]: 100, [U.c]: 900 }, T0);
+    ok(p, 'a patch');
+    eq(p.board[U.host], { n: 'Ada', p: 150, nt: 1, b: 150 }, 'a new row: points, one night, best night');
+    eq(p.board[U.b], { n: 'Ben', p: 400, nt: 3, b: 200 }, 'an old row grows; the best night stays the best');
+    ok(!p.board[U.c], 'a guest is not on the house’s board');
+    eq(p.last, { code: 'RMABCD', s: { [U.host]: 150, [U.b]: 100 } }, 'and what was counted is remembered');
+    const after = H.normalizeHouse(Object.assign(fixtureHouse({ room: 'RMABCD', roomExp: T0 }), p), HID);
+    eq(H.houseTally(after, 'RMABCD', { [U.host]: 150, [U.b]: 100, [U.c]: 900 }, T0), null, 'the same scores again: nothing');
+    const more = H.houseTally(after, 'RMABCD', { [U.host]: 400, [U.b]: 100 }, T0);
+    eq(more.board[U.host], { n: 'Ada', p: 400, nt: 1, b: 400 }, 'only the difference is added, and it is still one night');
+    eq(more.board[U.b].p, 400, 'a member who scored nothing more is unchanged');
+  });
+  t('a new room starts the count again, and a moved expiry is carried across', () => {
+    const h = H.normalizeHouse(fixtureHouse({ room: 'RMCDEF', roomExp: T0, last: { code: 'RMABCD', s: { [U.b]: 100 } } }), HID);
+    const p = H.houseTally(h, 'RMCDEF', { [U.b]: 50 }, T0 + 7200000);
+    eq(p.board[U.b], { n: 'Ben', p: 350, nt: 3, b: 200 }, 'fifty in a new room is fifty, and a new night');
+    eq(p.roomExp, T0 + 7200000, 'the house’s Join button follows the host’s “add 2 hours”');
+    const quiet = H.houseTally(H.normalizeHouse(fixtureHouse({ room: 'RMCDEF', roomExp: T0, last: { code: 'RMCDEF', s: {} } }), HID), 'RMCDEF', {}, T0);
+    eq(quiet, null, 'nothing scored and nothing moved: no write at all');
+    eq(H.houseTally(h, 'bad', { [U.b]: 50 }, T0), null, 'not a room code: nothing');
+  });
+  t('over the board cap, people who have left go first — never a member', () => {
+    const board = {};
+    for (let i = 0; i < 64; i++) board['gone' + i] = { n: 'g', p: i + 10, nt: 1, b: 1 };
+    const h = H.normalizeHouse(fixtureHouse({ board: board }), HID);
+    const p = H.houseTally(h, 'RMABCD', { [U.host]: 5 }, T0);
+    eq(Object.keys(p.board).length, H.BOARD_MAX);
+    ok(p.board[U.host] && !p.board.gone0, 'the new member is in, the lowest leaver is out');
+  });
+  t('one browser keeps the board: the host if a member, else the longest-present member online', () => {
+    H.__setOffset(T0 - Date.now());
+    const m = H.normalizeHouse(fixtureHouse(), HID).members;
+    const ps = H.normalizePlayers(fixturePlayers());
+    eq(H.houseRecorder(ps, U.host, m, T0), U.host);
+    eq(H.houseRecorder(ps, U.c, m, T0), U.host, 'a guest host: the first member online');
+    eq(H.houseRecorder(ps, U.c, { [U.c]: { nick: 'Cat' } }, T0), null, 'a member who is offline keeps nothing');
+    H.__setOffset(0);
+  });
+  t('the board reads points, then nights, then name — and a leaver is marked', () => {
+    const h = H.normalizeHouse(fixtureHouse({ board: { [U.b]: { n: 'Ben', p: 300, nt: 2, b: 200 },
+      [U.host]: { n: 'Ada', p: 300, nt: 3, b: 100 }, [U.c]: { n: 'Cat', p: 900, nt: 1, b: 900 } } }), HID);
+    eq(H.boardRows(h).map((r) => r.n + (r.member ? '' : '*')), ['Cat*', 'Ada', 'Ben']);
+  });
+
+  group('houses: the rules');
+  t('only a Google account reaches a house or a users document, and anonymous never does', () => {
+    const r = stripComments(RULES_SRC).replace(/^\s*\/\/.*$/gm, '');
+    ok(/function google\(\)\s*\{ return signedIn\(\) && request\.auth\.token\.firebase\.identities\.keys\(\)\.hasAny\(\['google\.com'\]\); \}/.test(r), 'asked of the token’s identities, which a LINKED account carries');
+    const users = (r.match(/match \/users\/\{uid\} \{[\s\S]*?\n    \}/) || [''])[0];
+    ok(/allow read:\s+if google\(\) && me\(\) == uid;/.test(users), 'users: read self only');
+    ok(/allow create, update: if google\(\) && me\(\) == uid && validUser/.test(users), 'users: write self only');
+    const houses = (r.match(/match \/houses\/\{id\} \{[\s\S]*?\n    \}/) || [''])[0];
+    ok(houses.length > 500, 'the houses block was found');
+    ok(/allow list:\s+if false;/.test(houses), 'a house code is a key, never a list');
+    ok(/allow get:\s+if google\(\);/.test(houses), 'any Google account holding the code may read');
+    ok(/request\.resource\.data\.owner == resource\.data\.owner/.test(houses), 'nobody changes the owner');
+    ok(/d\.owner in d\.members/.test(houses), 'and the owner stays a member');
+    ok(/request\.resource\.data\.rev == resource\.data\.rev \+ 1/.test(houses), 'every update is rev + 1');
+    ok(/members\.diff\(resource\.data\.members\)\.affectedKeys\(\)\.hasOnly\(\[me\(\)\]\)/.test(houses)
+       && /affectedKeys\(\)\.hasOnly\(\['members', 'rev'\]\)/.test(houses), 'a non-member may add only their own entry');
+    ok(/allow delete: if google\(\) && resource\.data\.owner == me\(\);/.test(houses), 'only the owner deletes');
+    ok(!/match \/\{document=\*\*\}/.test(r), 'and still no catch-all');
+  });
+  t('the rules file is still ASCII only', () => {
+    ok(/^[\x00-\x7F]*$/.test(RULES_SRC), 'a paste into the console mangled UTF-8 once', (RULES_SRC.match(/[^\x00-\x7F]/) || [''])[0]);
+  });
+
+  group('houses: the sign-in flow');
+  const MOD = () => (APP_SRC.match(/<script type="module">([\s\S]*?)<\/script>/) || [])[1] || '';
+  t('Google is LINKED onto the anonymous uid, and only an existing account switches', () => {
+    const mod = MOD();
+    ok(/if \(user && user\.isAnonymous\) \{\s*try \{\s*const r = await A\.linkWithCredential\(user, cred\);/.test(mod), 'link first: same uid, same seat');
+    ok(/await r\.user\.getIdToken\(true\);/.test(mod), 'and refresh the token, which is what the rules read');
+    ok(/credential-already-in-use[\s\S]{0,200}await window\.brApp\.beforeSwitch\(\);\s*await A\.signInWithCredential\(auth, again\);/.test(mod), 'an existing account: leave the room as the old uid, then switch');
+    ok(/async function signOut\(\) \{[\s\S]*?await window\.brApp\.beforeSwitch\(\);\s*await A\.signOut\(auth\);/.test(mod), 'signing out is a switch too');
+    const src = stripComments(APP_SRC);
+    ok(/closeRoom = !handTo && !switching;/.test(src) && /if \(local\.code === code && !switching\)/.test(src), 'a switch never closes the room, and keeps its code for the rejoin');
+  });
+  t('the popup opens inside the gesture: every door warmed, nothing awaited on the warm path', () => {
+    const mod = MOD();
+    ok(/const SIGNIN_DOORS = \['syncBtn', 'houseSignInBtn'\];/.test(mod), 'both doors');
+    ['syncBtn', 'houseSignInBtn'].forEach((id) => ok(new RegExp('id="' + id + '"').test(APP_SRC.replace(/<script[\s\S]*?<\/script>/g, '')), id + ' is in the markup, where the module can find it'));
+    ok(/for \(const ev of \['pointerenter', 'pointerdown', 'focus'\]\)/.test(mod), 'warmed before the click');
+    ok(/if \(!tokenClient\) \{\s*try \{ await warmGis\(\); \}/.test(mod), 'the only await is on the cold path');
+    ok(/if \(!popupIsAffordable\(\)\)/.test(mod), 'and a cold press asks for a second one rather than opening a dead tab');
+    const fns = [...mod.matchAll(/loadGis\(\)/g)].length;
+    eq(fns, 2, 'loadGis is defined once and called once — from warmGis, never at boot');
+    ok(/houseSignInBtn'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,200}window\.brCloud\.signIn\(\);\s*\}\);/.test(stripComments(APP_SRC)), 'the house door calls sign-in without awaiting first');
+  });
+  t('the client id is not part of the Firebase config, and nothing reaches firebaseapp.com', () => {
+    const mod = MOD();
+    ok(/const GOOGLE_CLIENT_ID = (null|"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com");/.test(mod), 'null until the console step, then the web client id');
+    ok(/const GIS = 'https:\/\/accounts\.google\.com\/gsi\/client';/.test(mod));
+    ok(!/signInWithPopup|signInWithRedirect/.test(stripComments(mod)), 'never the hosted popup the corporate filter blocks');
+  });
+  t('every write to users/{uid} merges, inside a transaction', () => {
+    const mod = MOD();
+    const sets = [...mod.matchAll(/tx\.set\(ref, [^;]*;/g)].map((m) => m[0]);
+    ok(sets.length >= 1, 'found the write');
+    sets.forEach((s) => ok(/\{ merge: true \}\)/.test(s), 'merges: ' + s));
+    ok(!/setDoc\(userRef/.test(mod), 'and no plain setDoc on it anywhere');
+  });
+  t('a room is labelled with its house only when it has one', () => {
+    const mod = MOD();
+    ok(/if \(house\) doc\.house = house;/.test(mod), 'so a plain room stays valid under every version of the rules');
+    ok(/if \(h\.room && h\.room !== code && Number\(h\.roomExp\) > Date\.now\(\)\) \{ other = h\.room; return; \}/.test(mod), 'two members opening at once: the first room stands');
+  });
+
+  group('houses: what a reader sees');
+  t('the account button is first in the row, painted by the markup, at a fixed width in em', () => {
+    const ctl = W.document.querySelector('.headctl');
+    const ids = [...ctl.children].map((c) => c.id).filter(Boolean);
+    eq(ids[0], 'syncBtn', 'first — the label that changes grows into empty space');
+    eq(ids[ids.length - 1], 'themeSel', 'and the theme picker is still last');
+    ok(/id="syncBtn"[^>]*>☁️ Sign In</.test(APP_SRC) && !/id="syncBtn"[^>]*hidden/.test(APP_SRC), 'visible in the markup, not revealed by the module');
+    ok(/#syncBtn \{ width: [\d.]+em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/.test(APP_SRC), 'one width in em, so a coarse pointer’s bigger type keeps it fixed');
+  });
+  t('the account button fits “Sign In” at both type sizes', () => {
+    /* The harness frame hides the button (no cloud), so measure a copy
+       with the page's own rule. */
+    const D = W.document;
+    const b = D.createElement('button');
+    b.id = 'syncBtn'; b.textContent = '☁️ Sign In';
+    D.querySelector('.headctl').prepend(b);
+    try {
+      [null, 'var(--fs-base)'].forEach((fs) => {
+        if (fs) b.style.fontSize = fs;
+        ok(b.scrollWidth <= b.clientWidth + 1, 'the label fits at ' + (fs || 'the row’s size'), b.scrollWidth + ' > ' + b.clientWidth);
+      });
+    } finally { b.remove(); }
+  });
+  t('signed out, the Houses card explains and offers the door; signed in, it lists the houses', () => {
+    const D = W.document;
+    try {
+      H.__plantRoom(null);
+      ok(!D.getElementById('houseCard').hidden, 'on the home screen');
+      ok(!D.getElementById('houseOut').hidden && D.getElementById('houseForms').hidden, 'signed out: the explanation and the button');
+      H.__setAccount({ google: true, name: 'Ada' });
+      H.__plantUserDoc({ nick: 'Ada', houses: [{ id: HID, name: 'Friday Quiz' }] });
+      ok(D.getElementById('houseOut').hidden && !D.getElementById('houseForms').hidden, 'signed in: the forms');
+      ok(/Loading/.test(D.getElementById('houseList').textContent), 'a house not yet read says so');
+      H.__plantHouse(HID, fixtureHouse());
+      const li = D.querySelector('[data-house="' + HID + '"]');
+      ok(li && /Friday Quiz/.test(li.textContent) && /2 members/.test(li.textContent), 'name and size', li && li.textContent);
+      ok(/Open Tonight’s Room/.test(li.textContent), 'no room tonight: the button opens one');
+      H.__plantHouse(HID, fixtureHouse({ room: 'RMABCD', roomExp: Date.now() + 3600000 }));
+      ok(/Join Tonight’s Room/.test(D.querySelector('[data-house="' + HID + '"]').textContent), 'a live room: the button joins it');
+      H.__plantRoom(fixtureRoom());
+      ok(D.getElementById('houseCard').hidden, 'and the card is gone inside a room');
+    } finally { houseDone(); }
+  });
+  t('the house window shows the code, the board and the members — escaped', () => {
+    const D = W.document;
+    try {
+      H.__setMe(U.b);
+      H.__plantHouse(HID, fixtureHouse({ name: '<img src=x onerror=window.__hXss=1>',
+        members: { [U.host]: { nick: 'Ada', at: 1 }, [U.b]: { nick: '<b>Ben</b>', at: 2 } },
+        board: { [U.b]: { n: '<b>Ben</b>', p: 300, nt: 2, b: 200 }, [U.c]: { n: 'Cat', p: 50, nt: 1, b: 50 } } }));
+      H.openHouse(HID);
+      const dlg = D.getElementById('houseDialog');
+      ok(dlg.open, 'the window opened');
+      eq(D.getElementById('houseDlgCode').textContent, HID);
+      ok(/#house=HSEAAAAA$/.test(D.getElementById('houseLink').value), 'the invite link');
+      const rows = [...D.querySelectorAll('#houseBoard tbody tr')].map((r) => [...r.children].map((c) => c.textContent.trim()).join(' '));
+      eq(rows, ['<b>Ben</b> 300 2 200', 'Cat (left) 50 1 50'], 'points, nights, best night; a leaver marked');
+      ok(!D.querySelector('#houseDialog img, #houseBoard b') && !W.__hXss, 'a name is text, never markup');
+      eq(D.getElementById('houseLeaveBtn').textContent, 'Leave the House', 'a member leaves');
+      dlg.close();
+      H.__setMe(U.host);
+      H.openHouse(HID);
+      eq(D.getElementById('houseLeaveBtn').textContent, 'Delete the House', 'the owner deletes');
+      dlg.close();
+      H.__plantHouse(HID, fixtureHouse({ board: {} }));
+      H.openHouse(HID);
+      ok(!D.querySelector('#houseBoard table'), 'an empty board is not a table of noughts');
+      dlg.close();
+    } finally { houseDone(); }
+  });
+  t('a room opened from a house says so, and links a member to the board', () => {
+    const D = W.document;
+    try {
+      H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantHouse(HID, fixtureHouse());
+      H.__plantRoom(fixtureRoom({ house: HID }));
+      ok(/Opened from the house Friday Quiz/.test(D.getElementById('roomView').textContent), 'the house is named');
+      ok(D.querySelector('#roomView [data-house-board="' + HID + '"]'), 'a member gets the leaderboard link');
+      H.__setMe(U.c);
+      ok(!D.querySelector('#roomView [data-house-board]') && /members’ points count/.test(D.getElementById('roomView').textContent), 'a guest is told, without the link');
+      H.__plantRoom(fixtureRoom());
+      ok(!/Opened from the house/.test(D.getElementById('roomView').textContent), 'an ordinary room says nothing');
+    } finally { houseDone(); }
+  });
+  t('the demo room belongs to a demo house, and your points reach its board', async () => {
+    const f = document.createElement('iframe');
+    f.setAttribute('data-br-tests', '');
+    f.setAttribute('aria-hidden', 'true');
+    f.style.cssText = 'position:absolute;left:-9999px;width:1000px;height:800px;border:0';
+    await new Promise((resolve) => { f.onload = resolve; f.src = 'index.html?demohouse=' + Date.now(); document.body.appendChild(f); });
+    const wait = async (fn, ms) => { const end = Date.now() + (ms || 3000); while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)); } return false; };
+    try {
+      const FW = f.contentWindow, FH = FW.__brTestHooks, D = FW.document;
+      ok(FH.HOUSE_RE.test(FH.DEMO_HOUSE), 'the demo house has a real code');
+      D.getElementById('demoBtn').click();
+      ok(await wait(() => FH.__room() && FH.__houses()[FH.DEMO_HOUSE]), 'the demo room and its house arrived');
+      eq(FH.__room().house, FH.DEMO_HOUSE);
+      ok(/Opened from the house The Demo House/.test(D.getElementById('roomView').textContent), 'the room says so');
+      eq(FH.boardRows(FH.__houses()[FH.DEMO_HOUSE]).length, FH.DEMO_PLAYERS.length, 'the invented players have nights behind them');
+      await FH.transport().push({ scores: { [FH.DEMO_ME]: 175 } });
+      ok(await wait(() => { const h = FH.__houses()[FH.DEMO_HOUSE]; return h && h.board[FH.DEMO_ME] && h.board[FH.DEMO_ME].p === 175; }), 'your points land on the board');
+      eq(FH.__houses()[FH.DEMO_HOUSE].board[FH.DEMO_ME].nt, 1, 'as one night');
+    } finally { f.remove(); }
+  });
+  t('the privacy page and the README say what signing in keeps', () => {
+    const p = visibleText(PRIVACY_SRC).replace(/\s+/g, ' ');
+    ok(/Google/.test(p) && /house/i.test(p) && /leaderboard/i.test(p), 'privacy.html covers Google sign-in, houses and the board');
+    ok(/only when you press/i.test(p), 'and says Google’s code is fetched only on a press');
   });
 
 }
