@@ -95,8 +95,10 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 228 (was 227; +1 for the stale-room fix
-below). **Tonight's room can go stale (fixed 2026-10-27):** the last player out deletes the
+**SCHEMA 5** (a room's `house`). CSP = League Night's line exactly. `EXPECTED` 229 (227 at M6; +1 stale-room fix, +1 pasted-link fix
+below). **Pasted invite links (fixed 2026-10-27):** `#join=` / `#house=` were read only at
+load, so a link pasted into a tab ALREADY on the app (hash change, no reload) did nothing; a
+`hashchange` listener now reads both. Keep it. **Tonight's room can go stale (fixed 2026-10-27):** the last player out deletes the
 room doc, but the house kept `room`/`roomExp`, so the card said "tonight's room is open" and
 Join hit "has ended". Now `leaveRoom` clears the house (`closeHouseRoom`, members only, only
 if the house still names THAT code) and `openHouseRoom` checks the room with `roomAlive()`

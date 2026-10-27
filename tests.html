@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 228;
+const EXPECTED = 229;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2652,6 +2652,24 @@ function define() {
     const mod = MOD();
     ok(/if \(house\) doc\.house = house;/.test(mod), 'so a plain room stays valid under every version of the rules');
     ok(/if \(h\.room && h\.room !== code && h\.room !== stale && Number\(h\.roomExp\) > Date\.now\(\)\) \{ other = h\.room; return; \}/.test(mod), 'two members opening at once: the first room stands');
+  });
+  t('an invite link pasted into an open tab is followed, not ignored', () => {
+    /* The hash changes and the page does not reload; only a hashchange
+       listener sees it. Driven for real: a join link fills the code box
+       and leaves the address bar clean. */
+    ok(/window\.addEventListener\('hashchange', \(\) => \{\s*const j = parseJoinHash\(location\.hash\), hc = parseHouseHash\(location\.hash\);/.test(APP_SRC), 'one listener reads both kinds of link');
+    const D = W.document, box = D.getElementById('joinCode'), hbox = D.getElementById('houseCode');
+    const was = box.value, hwas = hbox.value;
+    try {
+      W.location.hash = '#join=abc234';
+      W.dispatchEvent(new W.HashChangeEvent('hashchange'));
+      eq(box.value, 'ABC234', 'the room code lands in the box');
+      eq(W.location.hash, '', 'and the link is cleared from the address bar');
+      W.location.hash = '#house=abcd2345';
+      W.dispatchEvent(new W.HashChangeEvent('hashchange'));
+      eq(hbox.value, 'ABCD2345', 'a house code lands in its own box');
+      eq(W.location.hash, '', 'and that link is cleared too');
+    } finally { box.value = was; hbox.value = hwas; }
   });
   t('a house never sends its members to a room that has ended', () => {
     const mod = MOD();

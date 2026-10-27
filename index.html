@@ -5596,6 +5596,26 @@ $('houseLeaveBtn').addEventListener('click', async () => {
     toast(owner ? 'The house is deleted' : 'You have left the house');
   } catch (e) { console.warn('leave house', e); toast(describeCloudError(e)); }
 });
+/* A link pasted into a tab that already has the app open changes only the
+   hash, and the page does not reload — so the two arrivals read at load are
+   read again here, or the link does nothing at all (2026-10-27: a house
+   link pasted into an open tab sat in the address bar, ignored). */
+window.addEventListener('hashchange', () => {
+  const j = parseJoinHash(location.hash), hc = parseHouseHash(location.hash);
+  if (!j && !hc) return;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* the hash stays; harmless */ }
+  if (hc) {
+    houseArrival = hc;
+    $('houseCode').value = hc;
+    render();
+    houseArrive();
+    return;
+  }
+  $('joinCode').value = j;
+  if (room) { if (local.code !== j) toast('Leave this room first to join room ' + j); return; }
+  joinArrival = j;
+  if (me) afterAuth();  /* else the sign-in's own afterAuth() picks it up */
+});
 $('houseCloseBtn').addEventListener('click', () => $('houseDialog').close());
 closeOnBackdropClick($('houseDialog'));
 $('houseDialog').addEventListener('close', () => { houseOnScreen = null; });
