@@ -118,15 +118,17 @@ place today.
    UTF-8 punctuation, and the file must match the console byte for byte. *Done.*
 5. **Firestore → Time-to-live (in the Google Cloud console):** a TTL policy on the field
    `expiresAt` for each of the collection groups `rooms`, `players`, `answers` and `live`.
-   **Not done — TTL policies need the pay-as-you-go Blaze plan, and the project is on
-   Spark.** Until that changes, a finished room is NOT deleted by Firestore: the rules refuse
+   **Not done — TTL policies need the pay-as-you-go Blaze plan, and Charles decided on
+   27 October 2026 that the project stays on the free Spark plan.** So a finished room is
+   NOT deleted by Firestore: the rules refuse
    an expired room, the host closes the room when the last person leaves, and everyone's
    own records go when they leave, so what is left behind is only rooms people abandoned
-   without pressing Leave — small documents, well inside the free 1 GiB. Set the four
-   policies the day the project moves to Blaze.
+   without pressing Leave — small documents, well inside the free 1 GiB. If the project
+   ever moves to Blaze, set the four policies that day.
 6. **Budget alert** (Google Cloud → Billing): the control for a heavy drawing night.
-   **Not done — also needs a billing account.** On Spark there is nothing to bill; the free
-   tier simply stops answering when a day's 50,000 reads are used up.
+   **Not done — also needs a billing account, and the project stays on Spark.** There is
+   nothing to bill; the free tier simply stops answering when a day's 50,000 reads are used
+   up, which is the one thing a long drawing night (milestone 3) can run into.
 7. **API key referrer restriction** (Google Cloud → APIs & Services → Credentials → the
    browser key → Websites): `https://eagleadams86.github.io/*` and `http://localhost:8026/*`.
    A speed bump against casual reuse of the public config, not a boundary — the rules are
