@@ -173,12 +173,16 @@ service cloud.firestore {
         // answer's ansR, must carry a fresh sentinel. The client does.
         // `ansR` is "the round I have answered", so everyone can draw
         // "9 of 12 answered" without reading anybody's answer.
+        // `out` (2026-10-27, optional): the id of the game this player QUIT,
+        // 0 when they are in it. A number, never text - the engines read it
+        // to treat a quitter as gone from that one game.
         function validPlayer(d) {
-          return d.keys().hasOnly(['nick', 'joinedAt', 'seenAt', 'ansR', 'hue', 'expiresAt'])
+          return d.keys().hasOnly(['nick', 'joinedAt', 'seenAt', 'ansR', 'hue', 'expiresAt', 'out'])
             && d.nick is string && d.nick.size() >= 1 && d.nick.size() <= 20
             && d.joinedAt is number
             && d.seenAt == request.time
             && d.ansR is int && d.hue is int && d.hue >= 0 && d.hue <= 11
+            && (!('out' in d) || (d.out is int && d.out >= 0 && d.out <= 2000000000))
             && d.expiresAt is timestamp;
         }
         // Everyone in a live room draws the roster.

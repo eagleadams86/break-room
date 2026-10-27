@@ -17,6 +17,20 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
+**Quit, pause and end early (27 October 2026).**
+
+- **Quit Game** — any player, the host included, can step out of a game on the room card.
+  The game carries on without them as if they had left (nobody waits for their answer; a
+  drawer who quits passes the turn at once; Codenames finds a new spymaster), and they see
+  the lobby — games to look through — with **Rejoin the Game**. *Who's Here* says who is
+  sitting out. At the results a player's button is **Back to the Lobby**. Only a number is
+  stored for this: the id of the game they quit.
+- **Pause / Resume** — the host stops the clock for everyone: every countdown freezes, a
+  banner says who paused, and answers wait. Resume picks up exactly where it stopped.
+- **End Game for Everyone** — the host goes straight to the results, keeping the points
+  scored so far; the results say it was ended early. The icebreaker cards, the Codenames key
+  and the drawing are cleared just as at a normal finish.
+
 **Taking turns as host (27 October 2026).**
 
 - **Everyone sees the games.** Every player's lobby shows the game list and each game's
