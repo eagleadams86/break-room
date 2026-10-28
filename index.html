@@ -1008,6 +1008,15 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .draw-canvas { display: block; width: min(100%, calc(60vh * 4 / 3)); margin: 0 auto; aspect-ratio: 4 / 3; background: var(--surface-alt);
                  border: 1px solid var(--border); border-radius: var(--radius-sm); touch-action: none; }
   .draw-canvas.live { cursor: crosshair; border-color: var(--border-strong); }
+  /* WHILE A PHONE'S KEYBOARD IS UP (kbKeep(), below): the canvas takes the
+     width that lets the blanks, the drawing and the guess box all fit in what
+     the keyboard leaves, and Codenames' cards go shorter so the spymaster sees
+     the whole board under the clue box. */
+  .kb-open .draw-canvas { width: min(100%, calc(60vh * 4 / 3), var(--kb-canvas-w, 100%)); }
+  /* Shorter cards, so all five rows fit under the clue box on an iPhone. */
+  .kb-open .cn-board button { min-height: 34px; padding-top: 2px; padding-bottom: 2px; line-height: 1.15; }
+  .kb-open .cn-clueform { flex-wrap: nowrap; gap: var(--sp-3); }
+  .kb-open .cn-clueform .grow { flex: 1 1 auto; }
   .choices { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
   .choices button { flex: 1 1 9rem; min-height: 56px; font-size: var(--fs-lg); }
   .word-line { margin: 0; overflow-wrap: anywhere; }
@@ -5768,6 +5777,88 @@ addEventListener('focusin', (e) => {
   addEventListener('mouseup', keep, { once: true, capture: true });
 });
 
+/* THE GAME STAYS IN SIGHT ABOVE A PHONE'S KEYBOARD (Charles, iPhone,
+   2026-10-28). iOS scrolls a focused box to the middle of what the keyboard
+   leaves, so a guesser saw the bottom of the drawing and the room card, and a
+   spymaster typing a clue saw no board at all. So while a game's text box is
+   focused, the part of the game that box is ABOUT is kept between the top of
+   the screen and the keyboard: the countdown, blanks, drawing and guess box;
+   the clue box and the whole board; the icebreaker question and the answer
+   boxes. If it can't all fit, the top of it still leads, as long as the box
+   being typed in stays above the keyboard (three Two Truths boxes on a small
+   phone: the question scrolls away and the box wins).
+   Runs on focus and whenever the visual viewport RESIZES (the keyboard
+   arriving, changing height or going), never on its scroll — a player
+   scrolling the page by hand is not fought. Measured against
+   window.visualViewport, the only thing that knows where the keyboard is. */
+function kbSpan(el) {
+  const stage = el && el.closest && el.closest('#drawStage, #cnStage, #iceStage');
+  if (!stage || !raisesKeyboard(el)) return null;
+  if (stage.id === 'drawStage') return { top: stage.querySelector('.meter'), bottom: el.closest('.guessrow') || el, canvas: stage.querySelector('.draw-canvas') };
+  if (stage.id === 'cnStage') return { top: el.closest('.cn-clueform') || el, bottom: stage.querySelector('.cn-board') || el };
+  return { top: stage.querySelector('.qtext') || el, bottom: stage.querySelector('#iceSendBtn') || el };
+}
+/* Safari's floating ‹ › ✓ form bar over the keyboard's top edge, measured
+   at about 48px on an iPhone 17 (iOS 26) — still counted as visible. */
+const KB_BAR = 48;
+let kbLast = '';
+function kbKeep(e) {
+  const vv = window.visualViewport;
+  const el = document.activeElement;
+  const span = vv && matchMedia('(pointer: coarse)').matches ? kbSpan(el) : null;
+  const html = document.documentElement;
+  if (!span || !span.top || !span.bottom) { kbLast = ''; html.classList.remove('kb-open'); html.style.removeProperty('--kb-canvas-w'); return false; }
+  html.classList.add('kb-open');
+  const GAP = 8;
+  const head = document.querySelector('header');
+  const top = Math.max(vv.offsetTop, head ? head.getBoundingClientRect().bottom : 0);
+  const bottom = vv.offsetTop + vv.height - KB_BAR;
+  const room = bottom - top - 2 * GAP;
+  if (span.canvas) {
+    const h = span.bottom.getBoundingClientRect().bottom - span.top.getBoundingClientRect().top;
+    const rest = h - span.canvas.getBoundingClientRect().height;
+    html.style.setProperty('--kb-canvas-w', Math.max(160, Math.floor((room - rest) * 4 / 3)) + 'px');
+  }
+  /* A redraw puts focus back on the same box (keepFocus) — that is not a
+     reason to scroll, or a player reading the board would be pulled back
+     every time somebody else's dot changed. */
+  const stage = el.closest('[data-key]');
+  const id = focusKey(el) + '|' + (stage ? stage.getAttribute('data-key') : '');
+  const again = e && e.type === 'focusin' && id === kbLast;
+  kbLast = id;
+  if (again) return false;
+  const a = span.top.getBoundingClientRect();
+  /* The top of the span against the top of the screen — unless that leaves
+     the box itself under the keyboard, when the box sits just above it. */
+  let delta = a.top - (top + GAP);
+  const below = el.getBoundingClientRect().bottom - delta - (bottom - GAP);
+  if (below > 0) delta += below;
+  if (Math.abs(delta) > 2) window.scrollBy(0, delta);
+  return true;
+}
+let kbTimer = null, kbSettle = null;
+function kbSoon(e) {
+  clearTimeout(kbTimer);
+  clearTimeout(kbSettle);
+  /* After iOS has started its own scroll to the box, and again once the
+     keyboard has finished sliding up and that scroll has settled. */
+  kbTimer = setTimeout(() => requestAnimationFrame(() => {
+    if (kbKeep(e)) kbSettle = setTimeout(() => requestAnimationFrame(() => kbKeep({ type: 'settle' })), 400);
+  }), 60);
+}
+addEventListener('focusin', kbSoon);
+addEventListener('focusout', kbSoon);
+/* Only a change the size of a keyboard: Safari also resizes the visual
+   viewport by a few dozen pixels as its toolbar shrinks under a scrolling
+   finger, and that must never pull the page back. */
+let kbVh = window.visualViewport ? window.visualViewport.height : 0;
+if (window.visualViewport) window.visualViewport.addEventListener('resize', (e) => {
+  const h = window.visualViewport.height;
+  if (Math.abs(h - kbVh) < 120) return;
+  kbVh = h;
+  kbSoon(e);
+});
+
 /* A FOCUSED NUMBER BOX IGNORES THE MOUSE WHEEL (2026-10-23). Chrome steps a
    focused <input type="number"> on every wheel tick over it. The box loses
    focus on the first tick, which stops the step and lets the window scroll. */
@@ -6291,7 +6382,7 @@ window.__brTestHooks = {
   normalizeScores: normalizeScores, normalizeFeed: normalizeFeed, toMs: toMs, int: int, num: num,
   isOnline: isOnline, nextHost: nextHost, hostIsStale: hostIsStale,
   randomCode: randomCode, cleanCode: cleanCode, esc: esc, todayISO: todayISO,
-  raisesKeyboard: raisesKeyboard, opensOnFocus: opensOnFocus, backupPayload: backupPayload,
+  raisesKeyboard: raisesKeyboard, opensOnFocus: opensOnFocus, kbSpan: kbSpan, backupPayload: backupPayload,
   parseJoinHash: parseJoinHash, joinLink: joinLink, fmtLeft: fmtLeft, initials: initials,
   demoSim: demoSim, DEMO_PLAYERS: DEMO_PLAYERS, DEMO_ME: DEMO_ME, __demo: (on) => { demoOn = !!on; }, __pick: () => pick,
   transport: transport, hostTick: hostTick,

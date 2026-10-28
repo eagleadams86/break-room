@@ -143,8 +143,8 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 7** (game `pz`, the pause log, from the review below; 6 was game `gid` + `pausedAt` + `early`; 5 a room's `house`). CSP = League Night's line exactly. `EXPECTED` 263 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
-+2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below, +22 the review). **A deleted house lingered on members' cards
+**SCHEMA 7** (game `pz`, the pause log, from the review below; 6 was game `gid` + `pausedAt` + `early`; 5 a room's `house`). CSP = League Night's line exactly. `EXPECTED` 266 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below, +22 the review, +2 later fixes, +1 the keyboard fix below). **A deleted house lingered on members' cards
 (fixed 2026-10-27):** `deleteHouse` can only edit the FOUNDER's `users` doc, so each member's
 `watchHouses` listener drops the house from its own list when the server (not the cache)
 says it is gone.
@@ -475,3 +475,22 @@ count + crossing colour with a ±1 tolerance — replayed segments anti-alias on
 drawer's live strokes, and an exact-pixel check reads that as failure. While OFFLINE the
 Firestore SDK tries to load `www.google.com/images/cleardot.gif` (a connectivity probe) and
 the CSP blocks it: console noise only, reconnection is unaffected — do not widen `img-src`.
+
+## The game stays above a phone's keyboard (2026-10-28)
+
+Charles, iPhone: typing a guess hid the drawing, and a spymaster typing a clue saw no board.
+iOS scrolls a focused box to the MIDDLE of what the keyboard leaves. `kbKeep()` (beside the
+focusin select handler) now scrolls the part of the game the box is about into the space above
+the keyboard — drawing: countdown → guess box, with the canvas shrunk via `--kb-canvas-w`;
+Codenames: clue form → whole board (cards 34px while typing); icebreakers: question → Send.
+`kbSpan()` names those parts (pinned by a test). Three traps found on the iPhone 17 Simulator:
+- Safari resizes `visualViewport` by ~40px as its toolbar shrinks under a scrolling finger — only
+  a change of 120px+ counts as the keyboard, or scrolling by hand gets pulled back.
+- iOS 26's floating ‹ › ✓ form bar sits OVER the keyboard's top and is still inside
+  `visualViewport.height` — `KB_BAR` (48px) takes it off.
+- `keepFocus()` re-focuses the same box on every snapshot; that focusin must not scroll (same
+  focusKey + stage data-key = skip), or reading the board fights the redraws.
+Verified on the Simulator for drawing (guesser) and Codenames (spymaster); icebreakers is the
+same code path, not driven. The Simulator's software keyboard is OFF after `text` typing —
+`set_keyboard show` before tapping a box, never while one is focused (that skips the scroll).
+

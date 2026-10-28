@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 265;
+const EXPECTED = 266;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -855,6 +855,26 @@ function define() {
     ok(!H.opensOnFocus({ tagName: 'INPUT', type: 'checkbox' }), 'a checkbox opens nothing');
     ok(!H.opensOnFocus({ tagName: 'BUTTON' }), 'nor a button');
     ok(!H.opensOnFocus(null), 'nor nothing focused');
+  });
+  t('above a phone keyboard, each game keeps in view the part its text box is about', () => {
+    const D = W.document, box = D.createElement('div');
+    box.innerHTML = '<div id="drawStage"><div class="meter"></div><canvas class="draw-canvas"></canvas>'
+        + '<div class="guessrow"><input type="text" id="kbG"></div></div>'
+      + '<div id="cnStage"><div class="cn-clueform"><input type="text" id="kbC"><select id="kbN"></select></div><div class="cn-board"></div></div>'
+      + '<div id="iceStage"><p class="qtext"></p><input type="text" id="kbI"></div>'
+      + '<div id="trivStage"><input type="text" id="kbT"></div>';
+    D.body.appendChild(box);
+    try {
+      const q = (s) => box.querySelector(s);
+      const d = H.kbSpan(q('#kbG'));
+      ok(d.top === q('#drawStage .meter') && d.bottom === q('.guessrow') && d.canvas === q('canvas'), 'drawing: countdown to guess box, canvas shrinks to fit');
+      const c = H.kbSpan(q('#kbC'));
+      ok(c.top === q('.cn-clueform') && c.bottom === q('.cn-board'), 'Codenames: the clue box down to the whole board');
+      const i = H.kbSpan(q('#kbI'));
+      ok(i.top === q('.qtext') && i.bottom === q('#kbI'), 'icebreakers: the question down to the box');
+      ok(H.kbSpan(q('#kbN')) === null, 'a select raises no keyboard');
+      ok(H.kbSpan(q('#kbT')) === null, 'outside the three games, nothing');
+    } finally { box.remove(); }
   });
   t('[hidden] beats a class that sets display', () => {
     const css = (stripComments(APP_SRC).match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
