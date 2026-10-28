@@ -89,9 +89,11 @@ memory note `break-room-project` summarises the decisions.
 **The full review (2026-10-27, after M6).** Four read-only passes (security, game logic,
 accessibility, tests + docs); every finding fixed and pinned by a behavioural test in the
 group "the 2026-10-27 review" (mutation-checked: undo a fix and its test goes red).
-**Rules change pending: `createdAt` frozen on update, honest (±1 day) on create, and
-`expiresAt <= createdAt + 12h`** — the client already obeys it, so it ships before the
-paste; Charles presses Publish. Things a tidy-up would break:
+**Rules change PUBLISHED 2026-10-28** (console hash-checked against the repo file):
+`createdAt` frozen on update, honest (±1 day) on create, and `expiresAt <= createdAt + 12h`.
+Real-cloud check: two Playwright contexts created, joined and started trivia with no errors;
+the host stretching `expiresAt` to 13h, or moving `createdAt`, was refused. Things a
+tidy-up would break:
 - **`room.house` is `houseTag(code)`, never the code.** The house code is a key (any Google
   account holding it may join, then rename/zero the board), and every guest reads the room
   doc. `roomHouseId()` matches the tag against the account's codes (and accepts a raw code,
