@@ -117,13 +117,15 @@
          most likely to be slow enough to show the flash in the first place.
        • `visibility`, NEVER `display: none` — see the rule in the stylesheet.
          render() runs while this is on and has to measure a REAL layout.
-       • The DOMContentLoaded backstop below, so a script that dies on the way
-         to the release can never leave the page blank.
+       • The backstop below (4 s after DOMContentLoaded), so a script that
+         dies on the way to the release can never leave the page blank.
 
-     Released in the same task as the first render; search `data-booting`. */
+     Released by the first render that finds the cloud SETTLED — signed in,
+     a reload's rejoin tried, the recent rooms checked, a Google account's
+     houses read — or after 2.5 s, whichever is first; search `bootSettled`. */
   document.documentElement.dataset.booting = 'on';
   document.addEventListener('DOMContentLoaded', function () {
-    document.documentElement.removeAttribute('data-booting');
+    setTimeout(function () { document.documentElement.removeAttribute('data-booting'); }, 4000);
   }, { once: true });
     var t = localStorage.getItem('break-room-theme');
     if (t === 'slate') t = 'dark';
@@ -4308,6 +4310,26 @@ function sendCnPick(r, v) {
 /* Which screen: the home card when there is no room, the room otherwise. The
    home card is DERIVED on every render, never latched — leaving a room is what
    brings it back, with no special case. */
+/* The page is revealed by the first render that finds nothing left to arrive
+   that would MOVE it. Each of these, landing after the reveal, used to shove
+   the card about on every reload (Charles, 2026-10-28): the no-cloud note
+   showing until the module had run, the home card swapped for the room a
+   reload rejoins, the recent codes appearing once checked, and a Google
+   account's sign-in blurb swapped for its houses. In the SAME TASK as that
+   render — a frame later and the reveal is itself the flash. */
+let bootJoining = false, authFollowed = false, userDocSeen = false;
+function bootSettled() {
+  if (halted || room || demoOn) return true;
+  if (!window.brCloud) return false;          /* the module has not run yet */
+  if (!cloudOn()) return true;
+  if (!me || bootJoining || !authFollowed) return false;   /* a reload's rejoin, or a join link, not yet tried */
+  if (local.code) return false;                /* rejoined, but the room's first snapshot is still on its way */
+  if (local.recent.length && !recentAt) return false;
+  if (account.google && !userDocSeen) return false;
+  return true;
+}
+function reveal() { document.documentElement.removeAttribute('data-booting'); }
+
 function render() {
   const keep = keepFocus();
   const inRoom = !!room;
@@ -4316,6 +4338,7 @@ function render() {
   document.getElementById('roomView').hidden = !inRoom;
   document.getElementById('inviteBtn').hidden = !inRoom;
   if (inRoom) renderRoom(); else renderHome();
+  if (document.documentElement.hasAttribute('data-booting') && bootSettled()) reveal();
   keep();
   announceGame();
 }
@@ -4411,7 +4434,8 @@ function renderHome() {
     '<button type="button" class="btn-small" data-rejoin="' + esc(r.code) + '" title="Join room '
     + esc(r.code) + ' again">' + esc(r.code) + '</button>').join('');
   const cloud = cloudOn();
-  document.getElementById('noCloud').hidden = cloud;
+  /* Only once the module has run: before that, "no cloud" is not yet known. */
+  document.getElementById('noCloud').hidden = cloud || !window.brCloud;
   document.getElementById('createBtn').disabled = !cloud;
   document.getElementById('joinBtn').disabled = !cloud;
   document.getElementById('demoBtn').disabled = !!room;
@@ -4984,7 +5008,8 @@ window.brApp = {
   onStrokes: (raw) => { strokesDoc = normalizeStrokes(raw); padAdopt(); },
   onKey: (raw) => { iceKey = normalizeKey(raw); if (room && room.kind === 'codenames') render(); hostTick(); },
   onOffset: (ms) => { if (Number.isFinite(ms) && Math.abs(ms) < 7 * 24 * 3600000) offset = ms; },
-  onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); },
+  onError: (e) => { console.warn('cloud', e); toast(describeCloudError(e)); render(); },
+  onCloud: () => render(),
   noteWrite: noteWrite,
   /* M6: the account, its own document, and the houses it shows. */
   randomHouseCode: randomHouseCode,
@@ -4998,6 +5023,7 @@ window.brApp = {
     if (account.google && !was && houseArrival) setTimeout(houseArrive, 0);
   },
   onUserDoc: (raw) => {
+    userDocSeen = true;
     userDoc = normalizeUserDoc(raw);
     if (userDoc.nick && !local.nick) { local.nick = userDoc.nick; save(); }
     watchWanted();
@@ -5032,15 +5058,18 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 let joinArrival = null;
 async function afterAuth() {
   if (demoOn || room) return;
-  if (joinArrival) {
-    const code = joinArrival; joinArrival = null;
-    $('joinCode').value = code;
-    if (local.nick) { await doJoin(code, local.nick, true); return; }
-    toast('Pick a nickname to join room ' + code);
-    $('nickBox').focus();
-    return;
-  }
-  if (local.code && local.nick) await doJoin(local.code, local.nick, true);
+  bootJoining = true;
+  try {
+    if (joinArrival) {
+      const code = joinArrival; joinArrival = null;
+      $('joinCode').value = code;
+      if (local.nick) { await doJoin(code, local.nick, true); return; }
+      toast('Pick a nickname to join room ' + code);
+      $('nickBox').focus();
+      return;
+    }
+    if (local.code && local.nick) await doJoin(local.code, local.nick, true);
+  } finally { bootJoining = false; authFollowed = true; render(); }
 }
 
 async function doCreate(nick) {
@@ -6226,10 +6255,9 @@ function boot() {
      reader sees what the link was for even where it cannot be followed. */
   if (joinArrival) $('joinCode').value = joinArrival;
   render();
-  /* The page is now drawn where it belongs, so let it be seen. In the SAME TASK
-     as the render above — a frame later and the reveal is itself the flash. The
-     head script explains what was flashing before it. */
-  document.documentElement.removeAttribute('data-booting');
+  /* render() lets the page be seen once the cloud has settled; this is the
+     cap, so a slow sign-in costs at most a moment of empty page. */
+  setTimeout(reveal, 2500);
 }
 
 boot();
@@ -6258,7 +6286,7 @@ window.__brTestHooks = {
   ROOM_MS: ROOM_MS, EXTEND_MS: EXTEND_MS, ROOM_MAX_MS: ROOM_MAX_MS, HEARTBEAT_MS: HEARTBEAT_MS,
   ONLINE_MS: ONLINE_MS, HOST_STALE_MS: HOST_STALE_MS, HOST_OVERDUE_MS: HOST_OVERDUE_MS,
   PHASES: PHASES, KINDS: KINDS, GAMES: GAMES,
-  blankLocal: blankLocal, normalizeLocal: normalizeLocal, normalizePack: normalizePack, peekVerdicts: peekVerdicts,
+  blankLocal: blankLocal, normalizeLocal: normalizeLocal, normalizePack: normalizePack, peekVerdicts: peekVerdicts, bootSettled: bootSettled,
   normalizeRoom: normalizeRoom, normalizePlayers: normalizePlayers, normalizeAnswers: normalizeAnswers,
   normalizeScores: normalizeScores, normalizeFeed: normalizeFeed, toMs: toMs, int: int, num: num,
   isOnline: isOnline, nextHost: nextHost, hostIsStale: hostIsStale,
@@ -7082,6 +7110,9 @@ window.brCloud = {
   closeHouseRoom: closeHouseRoom,
 };
 updateNote();
+/* The page drew before this module ran, not knowing yet whether there is a
+   cloud; now it knows, so draw again (the no-cloud note, and the gate). */
+window.brApp.onCloud();
 if (cloudOn) {
   initPromise = init();
   initPromise.catch((e) => { console.warn('Cloud unavailable:', e); window.brCloud.on = false; window.brApp.onError(e); });

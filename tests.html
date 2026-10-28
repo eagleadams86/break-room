@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 264;
+const EXPECTED = 265;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -1013,10 +1013,21 @@ function define() {
     const setAt = src.indexOf("dataset.booting = 'on'");
     const themeAt = src.indexOf("localStorage.getItem('break-room-theme')");
     ok(setAt > -1 && themeAt > -1 && setAt < themeAt, 'and sets it before the theme read, which can throw', setAt + ' vs ' + themeAt);
-    ok(/DOMContentLoaded', function \(\) \{\s*document\.documentElement\.removeAttribute\('data-booting'\);/.test(src),
+    ok(/DOMContentLoaded', function \(\) \{\s*setTimeout\(function \(\) \{ document\.documentElement\.removeAttribute\('data-booting'\); \}, \d+\);/.test(src),
        'with a DOMContentLoaded backstop, so a script that dies on the way to the release can never leave the page blank');
-    ok(/render\(\);\s*document\.documentElement\.removeAttribute\('data-booting'\);/.test(src),
-       'and the release sits with the first render, in the SAME task — a frame later and the reveal is itself the flash');
+    ok(/renderHome\(\);\s*if \(document\.documentElement\.hasAttribute\('data-booting'\) && bootSettled\(\)\) reveal\(\);/.test(src),
+       'and the release sits inside render(), in the SAME task — a frame later and the reveal is itself the flash');
+    ok(/render\(\);\s*setTimeout\(reveal, \d+\);/.test(src), 'with a cap from boot, so a slow sign-in costs only a moment');
+    ok(/window\.brApp\.onCloud\(\);/.test(src), 'and the cloud module redraws once it has run, so a page with no cloud is released at once');
+  });
+  t('the gate waits for whatever would move the page, and only that', () => {
+    eq(H.bootSettled(), true, 'with no cloud behind the page (the harness), nothing is coming, so it is settled');
+    eq(W.document.getElementById('noCloud').hidden, false, 'and the no-cloud note shows once the module has said so');
+    const src = stripComments(APP_SRC);
+    const body = (src.match(/function bootSettled\(\) \{[\s\S]*?\n\}/) || [''])[0];
+    ['!window.brCloud', '!me', 'bootJoining', '!authFollowed', '!recentAt', 'userDocSeen'].forEach((w) =>
+      ok(body.indexOf(w) > -1, 'it waits on ' + w));
+    ok(/noCloud'\)\.hidden = cloud \|\| !window\.brCloud/.test(src), 'the no-cloud note never shows before the module has run');
   });
   t('the rule holds the paint, not the layout', () => {
     const src = stripComments(APP_SRC);
