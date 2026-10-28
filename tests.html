@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 241;
+const EXPECTED = 263;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -122,7 +122,7 @@ function stripComments(src) {
 }
 
 let W = null, H = null;
-let APP_SRC = '', PRIVACY_SRC = '', THEME_SRC = '', SW_SRC = '', KILL_SRC = '', MANIFEST_SRC = '', RULES_SRC = '';
+let APP_SRC = '', README_SRC = '', PRIVACY_SRC = '', THEME_SRC = '', SW_SRC = '', KILL_SRC = '', MANIFEST_SRC = '', RULES_SRC = '';
 
 async function main() {
   if (LOCAL_HOSTS.indexOf(location.hostname) === -1) {
@@ -141,6 +141,7 @@ async function main() {
   KILL_SRC     = await (await bustFetch('sw-kill.js')).text();
   MANIFEST_SRC = await (await bustFetch('manifest.webmanifest')).text();
   RULES_SRC    = await (await bustFetch('firestore.rules')).text();
+  README_SRC   = await (await bustFetch('README.md')).text();
 
   /* ── Guard the source actually loaded, BEFORE any negative assertion ───────
      An all-NOT test over a fetched file proves nothing when the fetch failed:
@@ -1305,8 +1306,8 @@ function define() {
   });
   t('a stale host is replaced by the longest-present online player, once', () => {
     const src = stripComments(APP_SRC);
-    ok(/hostIsStale\(players, room\.host, t\) && nextHost\(players, t\) === me && Date\.now\(\) - claimAskedAt > 30000/.test(src),
-       'only the one player who should, and not every tick');
+    ok(/hostIsStale\(players, room\.host, t\) && nextHost\(players\.filter\(\(p\) => p\.uid !== room\.host\), t\) === me\s*&& Date\.now\(\) - claimAskedAt > 30000/.test(src),
+       'only the one player who should, and not every tick — and the stale host is not a candidate for its own seat');
   });
   t('the heartbeat is every 90 s, and any other write counts as one', () => {
     const src = stripComments(APP_SRC);
@@ -1507,7 +1508,7 @@ function define() {
     eq(r.game.order, [59, 0, 2], 'order indexes clamped to the pack cap');
     eq(r.game.secs, 120, 'seconds clamped');
     eq(r.game.correct, 3, 'correct clamped');
-    eq(Object.keys(r.game).sort(), ['correct', 'counts', 'early', 'gained', 'gid', 'n', 'order', 'packId', 'pausedAt', 'qi', 'round', 'secs', 'step', 'stepAt', 'stepMs'], 'and nothing else');
+    eq(Object.keys(r.game).sort(), ['correct', 'counts', 'early', 'gained', 'gid', 'n', 'order', 'packId', 'pausedAt', 'pz', 'qi', 'round', 'secs', 'step', 'stepAt', 'stepMs'], 'and nothing else');
   });
 
   group('trivia: what a player sees');
@@ -1873,7 +1874,7 @@ function define() {
     eq([g.seen, g.got], [{ [U.b]: 2 }, { [U.b]: 1000 }], 'maps keyed by uid and clamped');
     eq(g.used, [H.DRAW_WORDS.length - 1, 0, 2], 'used indexes clamped to the list');
     eq([g.rounds, g.secs, g.ti], [3, 30, H.PLAYERS_MAX - 1], 'numbers clamped');
-    eq(Object.keys(g).sort(), ['drawer', 'early', 'gained', 'gid', 'got', 'hints', 'order', 'pass', 'pausedAt', 'round', 'rounds', 'secs', 'seed', 'seen', 'shape',
+    eq(Object.keys(g).sort(), ['drawer', 'early', 'gained', 'gid', 'got', 'hints', 'order', 'pass', 'pausedAt', 'pz', 'round', 'rounds', 'secs', 'seed', 'seen', 'shape',
       'step', 'stepAt', 'stepMs', 'ti', 'turns', 'used', 'word', 'wordHash'], 'and nothing else');
     ok(!('words' in g) && !('cards' in g), 'never the two keys the rules size-check for the later games');
   });
@@ -2683,7 +2684,7 @@ function define() {
   });
   t('a room is labelled with its house only when it has one', () => {
     const mod = MOD();
-    ok(/if \(house\) doc\.house = house;/.test(mod), 'so a plain room stays valid under every version of the rules');
+    ok(/if \(house\) doc\.house = window\.brApp\.houseTag\(house\);/.test(mod), 'so a plain room stays valid under every version of the rules — and carries a TAG, never the code');
     ok(/if \(h\.room && h\.room !== code && h\.room !== stale && Number\(h\.roomExp\) > Date\.now\(\)\) \{ other = h\.room; return; \}/.test(mod), 'two members opening at once: the first room stands');
   });
   t('an invite link pasted into an open tab is followed, not ignored', () => {
@@ -2723,7 +2724,7 @@ function define() {
        `.data().expiresAt` anywhere. */
     ok(!/\.data\(\)\.expiresAt/.test(mod), 'no Timestamp is ever read raw');
     ok(/if \(h\.room !== code\) return;\s*tx\.update\(houseRef\(id\), \{ room: null, roomExp: 0,/.test(mod), 'closing clears only the room the house still names');
-    ok(/const h = closeRoom && !demoOn && room && room\.house \? houses\[room\.house\] : null;[\s\S]{0,200}closeHouseRoom\(h\.id, code\)/.test(APP_SRC), 'the last one out clears it from the house');
+    ok(/const h = closeRoom && !demoOn && roomHouseId\(\) \? houses\[roomHouseId\(\)\] : null;[\s\S]{0,200}closeHouseRoom\(h\.id, code\)/.test(APP_SRC), 'the last one out clears it from the house');
   });
 
   group('quitting, pausing and ending a game');
@@ -2965,8 +2966,314 @@ function define() {
     const p = visibleText(PRIVACY_SRC).replace(/\s+/g, ' ');
     ok(/Google/.test(p) && /house/i.test(p) && /leaderboard/i.test(p), 'privacy.html covers Google sign-in, houses and the board');
     ok(/only when you press/i.test(p), 'and says Google’s code is fetched only on a press');
+    ok(/one-way tag/.test(p), 'and that a house room carries a tag, not the code');
+    ok(/colour of your avatar/.test(p) && /quit a game/.test(p), 'and every field of a player record');
+    ok(/Google sign-in/i.test(README_SRC) && /houses?/i.test(README_SRC) && /leaderboard/i.test(README_SRC), 'and the README does too');
   });
 
+
+  group('the 2026-10-27 review: what it found, driven for real');
+  const until = async (fn, ms) => { const end = Date.now() + (ms || 2000); while (Date.now() < end) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } return fn(); };
+  t('trivia: another player answering refreshes the count IN PLACE — the stage and the focused answer survive', () => {
+    const D = W.document;
+    try {
+      H.__setOffset(T0 + 2000 - Date.now()); H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantRoom(triviaRoom());
+      const stage = D.getElementById('trivStage');
+      ok(stage, 'the question is a keyed stage');
+      const btn = D.querySelector('#trivStage [data-ans="2"]');
+      btn.focus();
+      H.__plantPlayers(fixturePlayers().map((p) => (p.uid === U.host ? Object.assign({}, p, { ansR: 1 }) : p)));
+      ok(D.getElementById('trivStage') === stage, 'the same node — nothing was rebuilt');
+      ok(D.activeElement === btn, 'focus stayed on the answer, not thrown onto a new heading');
+      ok(/1 of 2 answered/.test(stage.textContent), 'while the count moved on');
+    } finally { home(); }
+  });
+  t('trivia: a wrong pick is called WRONG in words, and its edge is dashed — not only red against green', async () => {
+    const D = W.document;
+    const real = H.demoSim.answer;
+    H.demoSim.answer = async () => {};
+    try {
+      H.__demo(true);
+      H.__setOffset(T0 + 2000 - Date.now()); H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantRoom(triviaRoom());
+      const wrong = (Q0.c + 1) % 4;
+      D.querySelector('#trivStage [data-ans="' + wrong + '"]').click();
+      H.__plantRoom(triviaRoom({ step: 'reveal', stepAt: T0 + 3000, stepMs: H.REVEAL_MS, correct: Q0.c, counts: [1, 1, 0, 0], gained: {} }));
+      const b = D.querySelector('#trivStage [data-ans="' + wrong + '"]');
+      ok(/yours · wrong/.test(b.textContent), 'the tag says so: ' + b.textContent);
+      eq(W.getComputedStyle(b).borderTopStyle, 'dashed', 'a different SHAPE of edge');
+      eq(W.getComputedStyle(D.querySelector('#trivStage [data-ans="' + Q0.c + '"]')).borderTopStyle, 'solid', 'the right answer stays solid');
+    } finally { H.demoSim.answer = real; H.__demo(false); home(); }
+  });
+  t('a screen reader is TOLD when the game moves on — once, through one permanent live region', () => {
+    const D = W.document, news = D.getElementById('gameNews');
+    try {
+      ok(news && news.getAttribute('role') === 'status' && !D.getElementById('roomView').contains(news), 'outside the redrawn view');
+      H.__setOffset(T0 + 2000 - Date.now()); H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantRoom(fixtureRoom());
+      if (D.activeElement) D.activeElement.blur();   /* focus elsewhere: the heading is not read out by focus */
+      news.textContent = '';
+      H.__plantRoom(triviaRoom());
+      ok(/Question 1 of 3/.test(news.textContent), 'the new question is announced: ' + news.textContent);
+      news.textContent = '';
+      H.__plantPlayers(fixturePlayers().map((p) => (p.uid === U.host ? Object.assign({}, p, { ansR: 1 }) : p)));
+      eq(news.textContent, '', 'somebody else answering is not news');
+      H.__plantRoom(triviaRoom({ step: 'reveal', stepAt: T0 + 3000, stepMs: H.REVEAL_MS, correct: Q0.c, counts: [1, 0, 0, 0], gained: {} }));
+      ok(/next question in/.test(news.textContent), 'the reveal is: ' + news.textContent);
+    } finally { home(); }
+  });
+  t('Codenames: a card’s tag reads in the card’s own colour on a team tint (contrast)', () => {
+    const D = W.document;
+    const wrap = D.createElement('div');
+    wrap.className = 'cn-board';
+    wrap.innerHTML = '<button type="button" class="cn-b">ocean<span class="tag">Blue</span></button><button type="button" class="cn-g mine">gold<span class="tag">Gold</span></button>';
+    D.body.appendChild(wrap);
+    try {
+      [...wrap.querySelectorAll('button')].forEach((b) =>
+        eq(W.getComputedStyle(b.querySelector('.tag')).color, W.getComputedStyle(b).color, b.className + ': not --text-secondary'));
+      eq(W.getComputedStyle(wrap.querySelector('.mine')).outlineStyle, 'dashed', 'your pick is not drawn like keyboard focus');
+    } finally { wrap.remove(); }
+  });
+  t('closing a window opened from inside the room puts focus back on its button, though the room redrew', async () => {
+    const D = W.document;
+    try {
+      H.__plantLocal(Object.assign({}, FIXTURE_LOCAL, { code: 'ABCDEF' }));
+      H.__setOffset(T0 - Date.now()); H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantRoom(fixtureRoom());
+      const btn = D.getElementById('inviteBtn2');
+      btn.focus(); btn.click();
+      const dlg = [...D.querySelectorAll('dialog')].find((d) => d.open);
+      ok(dlg, 'the Invite window opened');
+      H.__plantPlayers(fixturePlayers());   /* a snapshot: the opener is replaced */
+      ok(!btn.isConnected, 'the button that opened it is gone');
+      dlg.close();
+      await until(() => D.activeElement && D.activeElement.id === 'inviteBtn2');
+      eq(D.activeElement && D.activeElement.id, 'inviteBtn2', 'focus is on the NEW Invite button, not <body>');
+    } finally { H.__plantLocal(FIXTURE_LOCAL); home(); }
+  });
+  t('why Start refused survives the next snapshot', () => {
+    const D = W.document;
+    try {
+      inLobby(U.host);
+      const k = D.getElementById('pickKind');
+      k.value = 'codenames'; k.dispatchEvent(new W.Event('change', { bubbles: true }));
+      D.getElementById('startBtn').click();
+      const said = D.getElementById('lobbyWarn').textContent;
+      ok(/four/i.test(said), 'Codenames with two online is refused: ' + said);
+      H.__plantPlayers(fixturePlayers());
+      eq(D.getElementById('lobbyWarn').textContent, said, 'and still says so after a redraw');
+    } finally { home(); }
+  });
+  t('a home-card error names its box (aria-invalid + aria-describedby) and moves focus there', () => {
+    const D = W.document, nick = D.getElementById('nickBox'), code = D.getElementById('joinCode');
+    const was = [nick.value, code.value];
+    try {
+      eq(nick.getAttribute('aria-describedby'), 'homeWarn');
+      eq(code.getAttribute('aria-describedby'), 'homeWarn');
+      nick.value = '';
+      D.getElementById('createBtn').disabled = false;
+      D.getElementById('createBtn').click();
+      eq(nick.getAttribute('aria-invalid'), 'true', 'the empty nickname is marked');
+      eq(D.activeElement, nick, 'and focused');
+      W.homeFieldError('nickBox', '');
+      ok(!nick.hasAttribute('aria-invalid'), 'cleared once it is fine');
+    } finally { nick.value = was[0]; code.value = was[1]; W.homeFieldError('nickBox', ''); W.render(); }
+  });
+  t('drawing: the drawer can Pass My Turn without a pointer, and the turn moves on', () => {
+    const D = W.document;
+    try {
+      inDraw(U.host, { step: 'pick', stepMs: H.PICK_MS });
+      ok(D.getElementById('drawPassBtn'), 'the drawer is offered it while picking');
+      inDraw(U.host);
+      ok(D.getElementById('drawPassBtn'), 'and while drawing');
+      inDraw(U.b);
+      ok(!D.getElementById('drawPassBtn'), 'a guesser is not');
+      const r = H.normalizeRoom(drawRoom());
+      const p = DRAW.step(r, { answers: [{ uid: U.host, r: 1, v: 'pass', at: T0 + 5000 }], players: drawPlayers(), now: T0 + 6000 });
+      ok(p && p.game.step === 'pick' && p.game.drawer === U.b && p.game.round === 2, 'Ben draws next');
+      ok(p.feed.some((f) => f.text === 'passed their turn'), 'and the feed says why');
+      eq(DRAW.step(r, { answers: [{ uid: U.b, r: 1, v: 'pass', at: T0 + 5000 }], players: drawPlayers(), now: T0 + 6000 }), null, 'a guesser cannot pass the drawer’s turn');
+    } finally { home(); }
+  });
+  t('a pause never hands out the speed bonus: an answer before it is measured from the real start', () => {
+    /* 20 s question from T0; answered at 10 s; paused 12–72 s; the resume
+       moved stepAt on to T0+60000. The answer took 10 s, not −50 s. */
+    const pz = [{ s: 'ask', r: 1, at: T0 + 72000, ms: 60000 }];
+    eq(W.stepElapsed({ step: 'ask', round: 1, stepAt: T0 + 60000, pz: pz }, T0 + 10000), 10000, 'before the pause');
+    eq(W.stepElapsed({ step: 'ask', round: 1, stepAt: T0 + 60000, pz: pz }, T0 + 75000), 15000, 'after it: 12 s + 3 s');
+    eq(W.stepElapsed({ step: 'ask', round: 2, stepAt: T0 + 60000, pz: pz }, T0 + 65000), 5000, 'another question’s pauses are ignored');
+    const r = H.normalizeRoom(triviaRoom({ stepAt: T0 + 60000, pz: pz }));
+    const p = TRIV.step(r, ctx([{ uid: U.host, r: 1, v: Q0.c, at: T0 + 10000 }, { uid: U.b, r: 1, v: Q0.c, at: T0 + 75000 }], T0 + 76000));
+    eq(p.game.gained[U.host], 150, '10 s into 20 is half the bonus — it was 200');
+    eq(p.game.gained[U.b], 125, '15 s in');
+  });
+  t('Resume logs the pause on the game, and moves the step on by it', async () => {
+    let got = null;
+    const real = H.demoSim.push;
+    H.demoSim.push = async (patch) => { got = patch; return 99; };
+    try {
+      H.__demo(true); H.__resetPush();
+      inGameAs(U.host, trivPlay({ pausedAt: T0 + 5000 }));
+      H.__setOffset(T0 + 65000 - Date.now());
+      W.togglePause();
+      await until(() => got);
+      ok(Math.abs(got.game.stepAt - (T0 + 60000)) < 1000, 'stepAt moved on by the minute it stood: ' + (got.game.stepAt - T0));
+      eq(got.game.pausedAt, 0, 'running again');
+      eq(got.game.pz.length, 1, 'one pause logged');
+      eq([got.game.pz[0].s, got.game.pz[0].r], ['ask', 1], 'for this step');
+    } finally { H.demoSim.push = real; H.__resetPush(); H.__demo(false); home(); }
+  });
+  t('End Game on a game with no end() of its own: results, early, unpaused, and the feed says so', async () => {
+    let got = null;
+    const real = H.demoSim.push, realC = W.confirm;
+    H.demoSim.push = async (patch) => { got = patch; return 99; };
+    W.confirm = () => true;
+    try {
+      H.__demo(true); H.__resetPush();
+      inGameAs(U.host, trivPlay({ pausedAt: T0 + 5000 }));
+      W.endGame();
+      await until(() => got);
+      eq([got.phase, got.game.step, got.game.early, got.game.pausedAt], ['results', 'results', 1, 0]);
+      eq(got.feed[got.feed.length - 1].text, 'the host ended the game early');
+    } finally { H.demoSim.push = real; W.confirm = realC; H.__resetPush(); H.__demo(false); home(); }
+  });
+  t('a button press waits for the last push to land — a patch built on a stale room would rewind the game', async () => {
+    const pushed = [];
+    const real = H.demoSim.push;
+    H.demoSim.push = async (patch) => { pushed.push(patch); return 99; };
+    try {
+      H.__demo(true); H.__resetPush();
+      inGameAs(U.host, trivPlay());
+      eq(await H.pushPatch({ game: { step: 'reveal' } }), true, 'the first push goes');
+      eq(await H.pushPatch({ game: { step: 'ask', pausedAt: 'now' } }), false, 'the room is still at rev 3, not 99: refused');
+      eq(pushed.length, 1, 'nothing else was written');
+    } finally { H.demoSim.push = real; H.__resetPush(); H.__demo(false); home(); }
+  });
+  t('a stale host’s seat is taken at THREE minutes, while they still count as online', () => {
+    let claims = 0;
+    const real = H.demoSim.claimHost;
+    H.demoSim.claimHost = () => { claims++; return Promise.resolve(); };
+    try {
+      H.__demo(true); H.__resetPush();
+      H.__setOffset(T0 - Date.now()); H.__setMe(U.b);
+      H.__plantRoom(fixtureRoom());
+      H.__plantPlayers(fixturePlayers().map((p) => (p.uid === U.host ? Object.assign({}, p, { seenAt: T0 - 3.5 * 60000 }) : p)));
+      ok(H.isOnline(H.__players()[0], T0), 'Ada is still “online” at 3½ minutes');
+      H.hostTick(); H.hostTick();
+      eq(claims, 1, 'Ben claims, once');
+      H.__resetPush(); H.__setMe(U.c);
+      H.hostTick();
+      eq(claims, 1, 'Cat (away) does not');
+    } finally { H.demoSim.claimHost = real; H.__resetPush(); H.__demo(false); home(); }
+  });
+  t('Leave: the host hands on, the last one out closes, a switch never closes, a player just goes', async () => {
+    const seen = [];
+    const realL = H.demoSim.leave, realS = H.demoSim.stop, realSave = W.save;
+    H.demoSim.leave = async (o) => { seen.push(o); };
+    H.demoSim.stop = () => {};
+    W.save = () => {};
+    const go = async (asUid, list, opts) => {
+      H.__demo(true);
+      H.__plantLocal(Object.assign({}, FIXTURE_LOCAL, { code: 'ABCDEF' }));
+      H.__setOffset(T0 - Date.now()); H.__setMe(asUid);
+      H.__plantRoom(fixtureRoom()); H.__plantPlayers(list);
+      H.__setDraw({ round: 1, word: 'cat' });
+      await W.leaveRoom(null, opts);
+      return seen[seen.length - 1];
+    };
+    try {
+      eq(await go(U.host, fixturePlayers()), { handTo: U.b, closeRoom: false }, 'to Ben, the next online');
+      eq(H.__room(), null, 'and out of the room');
+      eq(H.__myDraw(), { round: 0, word: '' }, 'with last game’s drawing word forgotten');
+      eq(await go(U.host, fixturePlayers().slice(0, 1)), { handTo: null, closeRoom: true }, 'alone: closed');
+      eq(await go(U.host, fixturePlayers().slice(0, 1), { switching: true }), { handTo: null, closeRoom: false }, 'switching account: never closed');
+      eq(H.__local().code, 'ABCDEF', 'and the code kept for the rejoin');
+      eq(await go(U.b, fixturePlayers()), { handTo: null, closeRoom: false }, 'a player just leaves');
+    } finally { H.demoSim.leave = realL; H.demoSim.stop = realS; W.save = realSave; H.__demo(false); H.__plantLocal(FIXTURE_LOCAL); home(); }
+  });
+  t('a new game forgets the last one’s drawing word (the drawer was locked out of picking)', () => {
+    const realSave = W.save;
+    W.save = () => {};
+    try {
+      H.__demo(true);
+      H.__plantLocal(Object.assign({}, FIXTURE_LOCAL, { code: 'ABCDEF' }));
+      H.__setOffset(T0 - Date.now()); H.__setMe(U.host);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantRoom(drawRoom());
+      H.__setDraw({ round: 1, word: 'cat' });
+      W.brApp.onRoom(fixtureRoom({ phase: 'results', kind: 'draw', game: drawGame({ step: 'results', drawer: U.b }) }));
+      eq(H.__myDraw(), { round: 0, word: '' });
+    } finally { W.save = realSave; H.__demo(false); H.__plantLocal(FIXTURE_LOCAL); home(); }
+  });
+  t('a custom pack’s answer key is ONE letter or digit — not empty, not two', () => {
+    const r = H.parsePack('Mine', 'Q1 | a | b | c | d |\nQ2 | a | b | c | d | CD\nQ3 | a | b | c | d | 12\nQ4 | a | b | c | d | b\nQ5 | a | b | c | d | 4');
+    eq(r.pack.qs.map((q) => q.c), [1, 3], 'B and 4 are kept');
+    eq(r.bad.map((b) => b.line), [1, 2, 3], 'the empty, the two-letter and the two-digit keys are reported');
+  });
+  t('another tab joining or leaving a room does not move THIS tab’s room', () => {
+    try {
+      H.__plantLocal(Object.assign({}, FIXTURE_LOCAL, { code: 'ABCDEF' }));
+      H.__setOffset(T0 - Date.now()); H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers()); H.__plantRoom(fixtureRoom());
+      W.dispatchEvent(new W.StorageEvent('storage', { key: H.LOCAL_KEY, newValue: JSON.stringify(Object.assign({}, FIXTURE_LOCAL, { nick: 'Zed', code: '' })) }));
+      eq(H.__local().nick, 'Zed', 'the other tab’s nickname is adopted');
+      eq(H.__local().code, 'ABCDEF', 'but this tab is still in its room');
+      home();
+      W.dispatchEvent(new W.StorageEvent('storage', { key: H.LOCAL_KEY, newValue: JSON.stringify(Object.assign({}, FIXTURE_LOCAL, { code: 'XYZ234' })) }));
+      eq(H.__local().code, 'XYZ234', 'out of a room, the saved code simply follows');
+    } finally { H.__plantLocal(FIXTURE_LOCAL); home(); }
+  });
+  t('an over-full roster never cuts the host or this browser', () => {
+    try {
+      H.__setMe(U.b);
+      H.__plantRoom(fixtureRoom());
+      const fakes = Array.from({ length: 40 }, (_, i) => ({ uid: 'FAKE' + String(i).padStart(24, '0'), nick: 'x', joinedAt: -1e15 + i, seenAt: T0, hue: 0 }));
+      const list = H.normalizePlayers(fakes.concat(fixturePlayers()));
+      eq(list.length, H.PLAYERS_MAX, 'still capped');
+      ok(list.some((p) => p.uid === U.host), 'the host is kept');
+      ok(list.some((p) => p.uid === U.b), 'and so am I');
+    } finally { home(); }
+  });
+  t('the tally counts only its OWN members — `constructor` is no member of anything', () => {
+    const h = H.normalizeHouse(fixtureHouse(), HID);
+    const p = H.houseTally(h, 'ABCDEF', { constructor: 500, toString: 7, [U.host]: 100 }, T0);
+    eq(Object.keys(p.board).filter((u) => !Object.hasOwn(h.members, u)), [], 'no junk row on the board');
+    eq(Object.keys(p.last.s), [U.host].filter((u) => h.members[u]), 'and none in what was counted');
+    ok(/if \(!Object\.hasOwn\(h\.members, room\.host\)\) return;/.test(APP_SRC), 'and a room a guest is hosting is never counted (its scores are the guest’s word)');
+  });
+  t('a house room carries a TAG of the house code, never the code; members still find their house', () => {
+    const D = W.document;
+    const tag = W.houseTag(HID);
+    ok(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(tag) && tag !== HID, 'eight characters the rules accept, and not the code: ' + tag);
+    eq(W.houseTag(HID), tag, 'the same every time');
+    try {
+      H.__setMe(U.b);
+      H.__plantPlayers(fixturePlayers());
+      H.__plantUserDoc({ nick: 'Ben', houses: [{ id: HID, name: 'Friday Quiz' }] });
+      H.__plantHouse(HID, fixtureHouse());
+      H.__plantRoom(fixtureRoom({ house: tag }));
+      ok(/Opened from the house Friday Quiz/.test(D.getElementById('roomView').textContent), 'a member’s browser resolves the tag');
+      ok(!D.getElementById('roomView').innerHTML.includes(HID) || D.querySelector('[data-house-board="' + HID + '"]'), 'the code shows only as a member’s board link');
+      ok(!/ids\.push\(room\.house\)/.test(APP_SRC), 'a guest no longer listens to the room’s house');
+    } finally { houseDone(); }
+  });
+  t('a house link fills the Join box and waits for the press; it never joins on its own', () => {
+    const src = stripComments(APP_SRC);
+    const fn = (src.match(/function houseArrive\(\) \{[\s\S]*?\n\}/) || [''])[0];
+    ok(fn && !/doJoinHouse/.test(fn), 'houseArrive no longer calls doJoinHouse');
+    ok(/\$\('houseCode'\)\.value = id;/.test(fn), 'it puts the code in the box');
+  });
+  t('the rules pin a room’s birth: createdAt frozen, and never more than twelve hours from it', () => {
+    ok(/request\.resource\.data\.createdAt == resource\.data\.createdAt/.test(RULES_SRC), 'frozen on update');
+    ok(/d\.expiresAt <= timestamp\.value\(d\.createdAt\) \+ duration\.value\(12, 'h'\)/.test(RULES_SRC), 'capped from birth');
+    ok(/createdAt > request\.time\.toMillis\(\) - 86400000/.test(RULES_SRC), 'and an honest birth on create');
+    ok(/createdAt: t,/.test(MOD()) && /const t = Date\.now\(\)/.test(MOD()), 'the module writes an integer ms createdAt');
+  });
 }
 
 /* ── EVERY TEST IS AWAITED (2026-09-14) ─────────────────────────────────────

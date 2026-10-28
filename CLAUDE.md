@@ -86,7 +86,53 @@ memory note `break-room-project` summarises the decisions.
 
 ## Status
 
-**M6 — Google sign-in and houses (2026-10-27, branch `m6-houses`).** The family's GIS flow
+**The full review (2026-10-27, after M6).** Four read-only passes (security, game logic,
+accessibility, tests + docs); every finding fixed and pinned by a behavioural test in the
+group "the 2026-10-27 review" (mutation-checked: undo a fix and its test goes red).
+**Rules change pending: `createdAt` frozen on update, honest (±1 day) on create, and
+`expiresAt <= createdAt + 12h`** — the client already obeys it, so it ships before the
+paste; Charles presses Publish. Things a tidy-up would break:
+- **`room.house` is `houseTag(code)`, never the code.** The house code is a key (any Google
+  account holding it may join, then rename/zero the board), and every guest reads the room
+  doc. `roomHouseId()` matches the tag against the account's codes (and accepts a raw code,
+  for rooms written before). `watchWanted` no longer listens to a room's house. Same
+  alphabet and length as a code, so the rules' `size() == 8` still holds — no rules change.
+- **`houseTick` counts only a room a MEMBER hosts** (`Object.hasOwn(h.members, room.host)`):
+  the host writes `scores`, and a guest handed or claiming the seat could otherwise push a
+  billion points through a member's browser. `houseTally` uses `Object.hasOwn` throughout
+  (`ID_RE` lets `constructor` through).
+- **`#house=` fills `#houseCode` and waits for the press.** It used to join on arrival.
+- **Pauses are logged on the game (`pz`, ≤ 8, `{s, r, at, ms}`), and speed bonuses use
+  `stepElapsed()`.** Resume still shifts `stepAt` (every clock depends on that); without the
+  log an answer given BEFORE the pause measured negative and scored the full bonus.
+- **`pushPatch` refuses while the last push's snapshot is unseen** (`pendingRev`), exactly
+  as `hostTick` waits: a Pause pressed in that gap rewound a reveal to its question.
+- **The stale host is not a candidate for its own seat** in hostTick's `nextHost`: between
+  3 and 4 minutes silent they still count online, and the takeover waited for 4.
+- **`myDraw` / `myGuess` reset with the others** (onRoom's new-game line and leaveRoom); a
+  drawer at the same round number as last game's pick could not pick.
+- **The `storage` listener keeps THIS tab's `local.code` while it is in a room.**
+- **`normalizePlayers` never cuts the host or `me`** over the 32 cap (a code-holder can
+  write a 1970 `joinedAt`). Rules on `joinedAt` were considered and left: freezing it could
+  refuse a rejoin whose roster had not loaded yet.
+- **`openHouseRoom` asks `roomAlive(d.room)` whatever `roomExp` says** (an unrecorded
+  Extend left two rooms and a doubled night).
+- **Trivia refreshes in place** (`key`/`meter`/`refresh`, keyed on pack, question, step and
+  "have I answered") like the other three games — a full redraw per answer moved focus
+  onto a new heading every time. **`#gameNews`** is one permanent live region outside
+  `#roomView`; `announceGame()` speaks the heading + meter when a stage's `data-key`, the
+  phase or pause changes, never per tick. **`returnFocusOnClose`** (MutationObserver on
+  `open`, not the `close` event) finds a dialog's opener again by `focusKey`. `lobbyError`
+  survives redraws. Home-card errors set `aria-invalid` on a box `aria-describedby="homeWarn"`.
+  **Pass My Turn** (`DRAW_PASS`) is the drawer's non-pointer way out. Trivia's wrong pick
+  says "wrong" with a dashed edge; Codenames tags `color: inherit` on team tints (3.5:1
+  before) and your pick is a dashed text-colour ring (the solid one was the focus ring).
+- **Considered and left:** narrowing the CSP's `www.gstatic.com` to the SDK path (CSP =
+  League Night's line exactly, a family decision); rules caps on house member contents and
+  stroke elements (the normalizers slice everything on the way in; Spark quota is the only
+  cost); in-game form errors still toast.
+
+**M6 — Google sign-in and houses (2026-10-27, PR #2, merged).** The family's GIS flow
 (League Night's `SIGNIN_DOORS` = `syncBtn` + `houseSignInBtn`, no `await` on the warm path,
 `popupIsAffordable`), `#syncBtn` FIRST in the row at a fixed `8em` with an ellipsis,
 `users/{uid}` (self only, `{nick, houses:[{id,name}]}`, every write a merging transaction)
@@ -95,8 +141,8 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 6** (game `gid` + `pausedAt` + `early`, 2026-10-27; was 5 for a room's `house`). CSP = League Night's line exactly. `EXPECTED` 241 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
-+2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below). **A deleted house lingered on members' cards
+**SCHEMA 7** (game `pz`, the pause log, from the review below; 6 was game `gid` + `pausedAt` + `early`; 5 a room's `house`). CSP = League Night's line exactly. `EXPECTED` 263 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
++2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below, +22 the review). **A deleted house lingered on members' cards
 (fixed 2026-10-27):** `deleteHouse` can only edit the FOUNDER's `users` doc, so each member's
 `watchHouses` listener drops the house from its own list when the server (not the cache)
 says it is gone.
@@ -135,8 +181,8 @@ creating a house; the board counted 150 then only the difference to 400, one nig
 guest left off; sign-out left as the account and rejoined as a new anonymous player with
 the code kept; signing in again from that anonymous player hit `credential-already-in-use`,
 switched back to the SAME Google uid, rejoined the room with the board intact, and took the
-seat back through the handoff clause ~30 s later. NOT observed: a second Google account
-joining by `#house=` link (only one account to test with).
+seat back through the handoff clause ~30 s later. A second Google account joining a house
+was observed later the same day (it now needs a Join press — see the review below).
 
 **Things a tidy-up would break (M6):**
 - **Sign-in LINKS (`linkWithCredential`) onto the anonymous uid, never signs in fresh.** The

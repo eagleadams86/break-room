@@ -2,7 +2,7 @@
   "id": "/break-room/",
   "name": "Break Room",
   "short_name": "Break Room",
-  "description": "A room your team drops into with a nickname and a six-letter code: see who is around and play trivia together beside the call you already have open.",
+  "description": "A room your team drops into with a nickname and a six-letter code: see who is around and play trivia, drawing, icebreakers or Codenames beside the call you already have open.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

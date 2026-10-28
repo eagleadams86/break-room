@@ -6,9 +6,9 @@
 # escaping discipline that prevents it (esc() on everything rendered, ids pinned
 # to a shape at every boundary) is worth having a machine re-check on every push.
 #
-# And this repo is where every new app in the family begins, so a pattern CodeQL
-# would flag here is a pattern the next five apps would inherit before anyone
-# looked.
+# And this app renders text typed in OTHER people's browsers on every screen —
+# nicknames, guesses, clues, icebreaker answers — so it is the family's widest
+# XSS surface.
 #
 # `security-events: write` is the one extra permission over the tests workflow,
 # and it is what lets the run publish alerts to the Security tab. Everything

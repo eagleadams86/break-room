@@ -108,8 +108,9 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
       <li><strong>The room itself:</strong> which game is on, the question in play, the running
         scores for the evening, and — only if the host wrote one — a custom question pack.</li>
       <li><strong>One record per player:</strong> your nickname, when you joined, when you were
-        last seen (a heartbeat every 90 seconds, which is what draws the online dot), and the
-        number of the last question you answered.</li>
+        last seen (a heartbeat every 90 seconds, which is what draws the online dot), the
+        number of the last question you answered, the colour of your avatar, and — if you
+        quit a game — a number naming that game.</li>
       <li><strong>Your current answer:</strong> which option you picked, overwritten each
         question. Only the host's browser can read answers before the reveal.</li>
       <li><strong>During a drawing game:</strong> the drawing itself, as pen strokes in one
@@ -165,6 +166,9 @@ footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     <ul>
       <li><strong>Your account's record</strong>, readable only by you: your nickname and the
         houses you belong to (their codes and names).</li>
+      <li><strong>On a house's room:</strong> a short one-way tag of the house's code, so
+        members' browsers know which house the room is for. A guest in the room cannot turn
+        the tag back into the code.</li>
       <li><strong>The house</strong>, readable by anyone signed in with Google who holds its
         eight-letter code: its name, the nickname of each member, which room it has open
         tonight, and its <strong>leaderboard</strong> — for each member, a nickname, total

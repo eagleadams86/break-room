@@ -55,7 +55,7 @@
      loss, and modern iOS ignores them anyway. The pack fixes it properly, by
      flooring form controls at 16px on a coarse pointer (rule 11). -->
 <title>Break Room</title>
-<meta name="description" content="A room your team drops into with a nickname and a six-letter code: see who is around and play trivia together beside the call you already have open.">
+<meta name="description" content="A room your team drops into with a nickname and a six-letter code: see who is around and play trivia, drawing, icebreakers or Codenames beside the call you already have open.">
 <meta name="mobile-web-app-capable" content="yes">
 <!-- Both stay: Chrome warns the apple- prefixed one is deprecated, older iOS
      reads only the apple- one. -->
@@ -921,7 +921,10 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .answers button.mine { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
   .answers button.mine .tag { color: var(--btn-text); }
   .answers button.right { border-color: var(--ok); background: var(--ok-bg); color: var(--text-primary); border-width: 2px; }
-  .answers button.wrong { border-color: var(--err); background: var(--err-bg); color: var(--text-primary); border-width: 2px; }
+  /* Right and wrong differ by SHAPE as well as hue (solid vs dashed edge) and
+     say so in words — --ok and --err are 1.5:1 apart in lightness in Light
+     and Sepia, the same border to a red-green colourblind eye. */
+  .answers button.wrong { border-color: var(--err); background: var(--err-bg); color: var(--text-primary); border-width: 2px; border-style: dashed; }
   .answers button.right .tag { color: var(--ok); }
   .answers button.wrong .tag { color: var(--err); }
   /* Disabled answers stay readable at the reveal: the pack dims a disabled
@@ -953,6 +956,9 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .cn-board button .tag { font-size: var(--fs-xs); color: var(--text-secondary); text-transform: none; }
   .cn-board button.cn-b { border: 2px solid var(--series-1); background: color-mix(in srgb, var(--series-1) 35%, var(--surface)); color: var(--text-primary); }
   .cn-board button.cn-g { border: 2px solid var(--series-2); background: color-mix(in srgb, var(--series-2) 35%, var(--surface)); color: var(--text-primary); }
+  /* The tag on a team tint reads in the card's own colour: --text-secondary
+     there measured 3.5–4.3:1 in Dark, Midnight and Sepia (small text needs 4.5). */
+  .cn-board button.cn-b .tag, .cn-board button.cn-g .tag { color: inherit; }
   .cn-board button.cn-n { border: 2px solid var(--border-strong); background: var(--surface-alt); color: var(--text-secondary); }
   .cn-board button.cn-x { border: 2px solid var(--text-primary); background: var(--text-primary); color: var(--bg); }
   .cn-board button.cn-x .tag { color: var(--bg); }
@@ -962,7 +968,9 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .cn-board button.cn-key.cn-n { background: var(--surface); }
   .cn-board button.cn-key.cn-x { background: var(--surface); color: var(--text-primary); }
   .cn-board button.cn-key.cn-x .tag { color: var(--text-primary); }
-  .cn-board button.mine { outline: 3px solid var(--focus-border); outline-offset: 1px; }
+  /* Your pick is a DASHED ring in the text colour — the solid --focus-border
+     ring is what keyboard focus looks like, and two "focused" cards lied. */
+  .cn-board button.mine { outline: 3px dashed var(--text-primary); outline-offset: 1px; }
   /* A board is a result to read, not a row of dead controls: pack rule 20's
      dimming would grey out every card nobody may press right now. */
   .cn-board button:disabled { opacity: 1; cursor: default; }
@@ -1011,7 +1019,7 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .tools .tool[aria-pressed="true"] { background: var(--btn-bg); color: var(--btn-text); border-color: var(--btn-bg); }
   .guessrow { display: flex; gap: var(--sp-4); margin-bottom: var(--sp-5); }
   .guessrow input { flex: 1 1 auto; min-width: 0; }
-  .got-line { margin: 0 0 var(--sp-5); }
+  .got-line, .pass-row { margin: 0 0 var(--sp-5); }
   .gains { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-6); }
   .feed { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; font-size: var(--fs-sm); }
   .feed li { padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
@@ -1114,7 +1122,7 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
     <div class="empty">
       <h2>Break Room</h2>
       <p>A room your team drops into beside the call you already have open: see who's
-        around, then play a round of trivia together. No account and nothing to install —
+        around, then play a game together — trivia, drawing, icebreakers or Codenames. No account and nothing to install —
         pick a nickname, then start a room or join one with its six-letter code.</p>
       <!-- The privacy claim the footer three inches below already makes, and the
            two must never disagree. -->
@@ -1123,7 +1131,7 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
       <div class="joinrow">
         <div class="field">
           <label for="nickBox">Nickname</label>
-          <input type="text" id="nickBox" maxlength="20" autocomplete="nickname" placeholder="What the room calls you">
+          <input type="text" id="nickBox" maxlength="20" autocomplete="nickname" placeholder="What the room calls you" aria-describedby="homeWarn">
         </div>
         <button type="button" class="primary" id="createBtn">Start a Room</button>
       </div>
@@ -1132,7 +1140,7 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
           <label for="joinCode">Room code
             <button class="tile-help" type="button" data-help="code" aria-label="How a room code works">i</button></label>
           <input type="text" id="joinCode" maxlength="8" autocomplete="off" autocapitalize="characters"
-                 spellcheck="false" placeholder="6 letters">
+                 spellcheck="false" placeholder="6 letters" aria-describedby="homeWarn">
         </div>
         <button type="button" id="joinBtn">Join</button>
       </div>
@@ -1218,6 +1226,10 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
 </div>
 
 <div id="toast" popover="manual" role="status" aria-live="polite"></div>
+<!-- The game's news for a screen reader (announceGame): one PERMANENT live
+     region outside #roomView, because a region rebuilt by every redraw is
+     announced unreliably or twice. -->
+<p id="gameNews" class="sr-only" role="status" aria-live="polite"></p>
 
 <!-- ── Dialogs ─────────────────────────────────────────────────────────────── -->
 
@@ -1378,7 +1390,7 @@ const THEME_KEY = 'break-room-theme';
    backup, catastrophic for a copy written by a NEWER build, which would have
    its new fields quietly deleted by an old host's next transaction.
    BUMP THIS AND THE ALLOWLISTS TOGETHER whenever you add a stored field. */
-const SCHEMA = 6;
+const SCHEMA = 7;
 
 /* ── Ids from outside are not trusted ──────────────────────────────────────
    A Firebase uid is 28 alphanumerics and already fits the family shape. Uids
@@ -1409,8 +1421,8 @@ function esc(s) {
    about a billion, and a room lives hours, not seasons, so League Night's
    eight would buy nothing. The code is the room's READ capability: nobody can
    list rooms (`allow list: if false` in firestore.rules), so holding the code
-   is the only way in, and that is the whole access model until a persistent
-   house arrives. crypto.getRandomValues, never Math.random. */
+   is the only way in, and that is the whole access model for a room (a
+   house, M6, has its own code and rules). crypto.getRandomValues, never Math.random. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LEN = 6;
 const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
@@ -1571,6 +1583,27 @@ function normalizeFeed(raw) {
 /* The game map is each game's own: the registry entry's `normalize` rebuilds
    it. With no game on, or an unknown kind, only the four fields every game
    shares survive. */
+/* HOW LONG AN ANSWER TOOK, pauses left out (the 2026-10-27 review). Resume
+   moves `stepAt` on by the pause, which is right for every clock — but an
+   answer given BEFORE the pause then measured from a start after it, came
+   out negative, and scored the full speed bonus. So each resume is logged
+   on the game for its step, and an answer is measured from the step's real
+   start less the pauses that had ended by then. No answer lands mid-pause
+   (answerGame refuses), so "ended by then" is the whole question. */
+const PAUSE_LOG_MAX = 8;
+function stepPauses(g) {
+  return (g.pz || []).filter((x) => x.s === g.step && x.r === g.round);
+}
+function pauseLog(g, at, ms) {
+  const kept = stepPauses(g);
+  return kept.length < PAUSE_LOG_MAX ? kept.concat([{ s: g.step, r: g.round, at: at, ms: ms }]) : kept;
+}
+function stepElapsed(g, at) {
+  const pz = stepPauses(g);
+  const held = pz.reduce((n, x) => n + x.ms, 0);
+  const before = pz.reduce((n, x) => n + (x.at <= at ? x.ms : 0), 0);
+  return at - (g.stepAt - held) - before;
+}
 function normalizeGame(kind, raw) {
   const g = (raw && typeof raw === 'object') ? raw : {};
   const base = {
@@ -1583,6 +1616,10 @@ function normalizeGame(kind, raw) {
     gid: int(g.gid, 0, GID_MAX, 0),
     pausedAt: toMs(g.pausedAt),
     early: g.early ? 1 : 0,       /* the host ended it before its time */
+    /* This step's pauses (SCHEMA 7): {s: step, r: round, at: resumed, ms}. */
+    pz: (Array.isArray(g.pz) ? g.pz : []).slice(0, PAUSE_LOG_MAX).map((x) => (x && typeof x === 'object') ? {
+      s: String(x.s == null ? '' : x.s).slice(0, 20), r: int(x.r, 0, 1e6, 0),
+      at: int(x.at, 0, 1e15, 0), ms: int(x.ms, 0, ROOM_MS, 0) } : null).filter(Boolean),
   };
   const game = GAMES[kind];
   return game && game.normalize ? game.normalize(g, base) : base;
@@ -1616,7 +1653,7 @@ function normalizeRoom(raw) {
    case a listener ever hands over two copies. */
 function normalizePlayers(list) {
   const seen = new Set();
-  return (Array.isArray(list) ? list : []).map((p) => {
+  const out = (Array.isArray(list) ? list : []).map((p) => {
     if (!p || typeof p !== 'object') return null;
     const id = String(p.uid == null ? '' : p.uid);
     if (!ID_RE.test(id) || seen.has(id)) return null;
@@ -1630,8 +1667,16 @@ function normalizePlayers(list) {
       hue: int(p.hue, 0, 11, 0),
       out: int(p.out, 0, GID_MAX, 0),
     };
-  }).filter(Boolean).sort((a, b) => a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1)).slice(0, PLAYERS_MAX);
+  }).filter(Boolean).sort(byJoined);
+  /* Over the cap the host and this browser are never the ones cut: any
+     code-holder can write a player record with a joinedAt in 1970, and 32 of
+     those pushed the real host off everyone's roster. */
+  if (out.length <= PLAYERS_MAX) return out;
+  const keep = (x) => x.uid === me || (!!room && x.uid === room.host);
+  const must = out.filter(keep);
+  return must.concat(out.filter((x) => !keep(x)).slice(0, PLAYERS_MAX - must.length)).sort(byJoined);
 }
+function byJoined(a, b) { return a.joinedAt - b.joinedAt || (a.uid < b.uid ? -1 : 1); }
 /* An answer is a short string, an int, or up to three short strings. The
    rules cannot look inside a list, so the per-element cap is CLIENT-SIDE ONLY
    and this is where it is enforced — say so in firestore.rules too. */
@@ -1693,7 +1738,7 @@ function hostIsStale(list, hostUid, t) {
    browser's anonymous uid, so the seat in a room, the scores against it and
    the house membership are one id. Only an account that already exists here
    (signed in on another browser first) changes the uid, and the app leaves
-   and rejoins the room for it (`switchAccount`).
+   and rejoins the room for it (`switchAway`, `brApp.beforeSwitch`).
 
    houses/{code} = { owner, rev, schema, name, createdAt,
                      members: {uid: {nick, at}},       ≤ 32
@@ -1765,6 +1810,26 @@ function normalizeUserDoc(raw) {
   }).filter(Boolean).slice(0, HOUSES_MAX);
   return out;
 }
+/* THE ROOM CARRIES A TAG, NEVER THE HOUSE'S CODE (the 2026-10-27 security
+   review). The house code is a key — any Google account holding it may join
+   the house and then rename it or zero its board — and every guest in a
+   house room can read the room document. So `room.house` is a one-way tag
+   of the code, in the code's own alphabet and length (the rules check only
+   "a string of eight"): members find their house by tagging the codes they
+   already have; a guest learns nothing. A room written before this named
+   the code itself, and still matches. */
+const HOUSE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function houseTag(id) {
+  const hex = sha256Hex('house-tag:' + id);
+  let out = '';
+  for (let i = 0; i < 8; i++) out += HOUSE_ABC[parseInt(hex.slice(i * 2, i * 2 + 2), 16) % 32];
+  return out;
+}
+function roomHouseId() {
+  if (!room || !room.house) return null;
+  const ids = userDoc.houses.map((h) => h.id).concat(Object.keys(houses));
+  return ids.find((id) => id === room.house || houseTag(id) === room.house) || null;
+}
 /* Tonight's room, if the house says it has one that has not ended. */
 function houseRoomLive(h, t) {
   return !!(h && h.room && h.roomExp > t);
@@ -1790,13 +1855,16 @@ function houseTally(h, code, scores, roomExp) {
   const board = JSON.parse(JSON.stringify(h.board || {}));
   const s = {};
   let changed = !same;
+  /* Own keys only: ID_RE lets `constructor` through, and members.constructor
+     is Object itself — truthy — which wrote junk onto the board. */
+  const own = (o, k) => !!o && Object.hasOwn(o, k);
   Object.keys(scores || {}).forEach((u) => {
-    if (!h.members[u]) return;
+    if (!own(h.members, u)) return;
     const cur = Math.max(0, int(scores[u], 0, 1e9, 0));
-    const was = Math.max(0, int(prev[u], 0, 1e9, 0));
+    const was = own(prev, u) ? Math.max(0, int(prev[u], 0, 1e9, 0)) : 0;
     s[u] = Math.max(cur, was);
     if (cur <= was) return;
-    const row = board[u] || { n: h.members[u].nick, p: 0, nt: 0, b: 0 };
+    const row = own(board, u) ? board[u] : { n: h.members[u].nick, p: 0, nt: 0, b: 0 };
     row.n = h.members[u].nick;
     row.p += cur - was;
     if (was === 0) row.nt += 1;
@@ -1808,7 +1876,7 @@ function houseTally(h, code, scores, roomExp) {
      never a member. */
   const keys = Object.keys(board);
   if (keys.length > BOARD_MAX) {
-    keys.filter((u) => !h.members[u]).sort((a, b) => board[a].p - board[b].p)
+    keys.filter((u) => !own(h.members, u)).sort((a, b) => board[a].p - board[b].p)
       .slice(0, keys.length - BOARD_MAX).forEach((u) => { delete board[u]; });
   }
   const patch = {};
@@ -1955,7 +2023,12 @@ addEventListener('storage', (e) => {
   let incoming = null;
   try { incoming = JSON.parse(e.newValue || 'null'); } catch (err) { return; }
   if (incoming && Number(incoming.version || 1) > SCHEMA) haltForNewerData(incoming.version);
+  /* `code` is ALSO the room this tab is sitting in. Another tab joining or
+     leaving a room must not move this one (it ignored every snapshot after
+     the other tab left, and invited to the wrong code after it joined). */
+  const mine = local.code;
   local = normalizeLocal(incoming);
+  if (room || demoOn) local.code = mine;
   render();
 });
 
@@ -2204,7 +2277,8 @@ function parsePack(name, text) {
     const parts = raw.split('|').map((s) => s.trim());
     if (parts.length !== 6) { bad.push({ line: i + 1, why: parts.length < 6 ? 'needs 6 parts separated by |' : 'has more than 6 parts — a | inside an answer?' }); return; }
     const key = parts[5].toUpperCase();
-    const c = 'ABCD'.indexOf(key) !== -1 ? 'ABCD'.indexOf(key) : '1234'.indexOf(key) !== -1 ? '1234'.indexOf(key) : -1;
+    /* ONE character: indexOf would have taken '' as A and 'CD' as C. */
+    const c = /^[A-D]$/.test(key) ? key.charCodeAt(0) - 65 : /^[1-4]$/.test(key) ? Number(key) - 1 : -1;
     if (c === -1) { bad.push({ line: i + 1, why: 'the last part must be A–D or 1–4' }); return; }
     if (!parts[0] || parts.slice(1, 5).some((a) => !a)) { bad.push({ line: i + 1, why: 'the question and all four answers must have text' }); return; }
     qs.push({ q: parts[0], a: parts.slice(1, 5), c: c });
@@ -2300,7 +2374,7 @@ GAMES.trivia = {
         const v = typeof a.v === 'number' ? a.v : -1;
         if (v >= 0 && v <= 3) counts[v] += 1;
         if (correct !== null && v === correct) {
-          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - (a.at - g.stepAt)));
+          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - stepElapsed(g, a.at)));
           const pts = 100 + Math.floor(100 * remaining / g.stepMs);
           gained[a.uid] = pts;
           scores[a.uid] = (scores[a.uid] || 0) + pts;
@@ -2329,10 +2403,7 @@ GAMES.trivia = {
     const mine = list.find((p) => p.uid === who);
     const answered = (myPick.round === g.round ? myPick.v : null);
     const haveAnswered = answered !== null || !!(mine && mine.ansR === g.round);
-    const online = list.filter((p) => isOnline(p, t));
-    const done = online.filter((p) => p.ansR === g.round).length;
     const reveal = g.step === 'reveal';
-    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
     let body;
     if (!q) {
       body = '<p class="lede">This question is missing — the pack this room is playing from is not in this copy of the app.</p>';
@@ -2341,8 +2412,8 @@ GAMES.trivia = {
         + q.a.map((a, i) => {
             let cls = '', tag = '';
             if (reveal) {
-              if (i === g.correct) { cls = ' right'; tag = 'correct'; }
-              else if (answered === i) { cls = ' wrong'; tag = 'yours'; }
+              if (i === g.correct) { cls = ' right'; tag = (answered === i ? 'yours · ' : '') + 'correct'; }
+              else if (answered === i) { cls = ' wrong'; tag = 'yours · wrong'; }
               if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' answer' : ' answers');
             } else if (answered === i) { cls = ' mine'; tag = 'your answer'; }
             /* The name is the button's own text — the answer, then its tag
@@ -2353,18 +2424,45 @@ GAMES.trivia = {
               + '<span>' + esc(a) + '</span>' + (tag ? '<span class="sr-only">, </span><span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
           }).join('') + '</div>';
     }
-    let line;
-    if (reveal) {
-      const got = g.gained && g.gained[who];
-      line = got ? '<strong class="gain">+' + got + '</strong> for you · next question in <span class="countdown" id="qLeft">' + fmtSecs(left) + '</span>'
-                 : (answered !== null || haveAnswered ? 'No points this time' : 'You didn’t answer') + ' · next question in <span class="countdown" id="qLeft">' + fmtSecs(left) + '</span>';
-    } else {
-      line = '<span class="countdown' + (left < 5000 ? ' low' : '') + '" id="qLeft">' + fmtSecs(left) + '</span> seconds · '
-        + done + ' of ' + online.length + ' answered';
-    }
-    return '<div class="card"><h2>Question ' + (g.qi + 1) + ' of ' + g.order.length + '<span class="spacer"></span><span class="pill">'
+    return '<div class="card" id="trivStage" data-key="' + esc(GAMES.trivia.key(r, who, list)) + '"><h2>Question ' + (g.qi + 1) + ' of ' + g.order.length + '<span class="spacer"></span><span class="pill">'
       + esc((packFor(r) || { name: 'Trivia' }).name) + '</span></h2>'
-      + '<div class="meter"><span>' + line + '</span></div>' + body + '</div>';
+      + '<div class="meter"><span data-part="meter">' + GAMES.trivia.meter(r, who, list, t) + '</span></div>' + body + '</div>';
+  },
+  /* Trivia refreshes IN PLACE, like the other three games (the 2026-10-27
+     review): every other player's answer is a snapshot, and a full redraw
+     per answer replaced the focused (disabled) button and threw focus onto
+     a NEW heading each time — a screen reader re-read "Question 3 of 20"
+     once per answer. Keyed on what changes the body: question, step, and
+     whether this player has answered. */
+  key(r, who, list) {
+    const g = r.game;
+    const mine = list.find((p) => p.uid === who);
+    const sent = (myPick.round === g.round && myPick.v !== null) || !!(mine && mine.ansR === g.round);
+    return [g.packId, questionAt(r, g.qi) ? 'q' : '-', g.qi, g.step, g.round, who, sent ? (myPick.round === g.round ? 'v' + myPick.v : 'sent') : ''].join(':');
+  },
+  meter(r, who, list, t) {
+    const g = r.game;
+    const left = g.stepAt ? g.stepAt + g.stepMs - t : 0;
+    const mine = list.find((p) => p.uid === who);
+    const answered = (myPick.round === g.round ? myPick.v : null);
+    const haveAnswered = answered !== null || !!(mine && mine.ansR === g.round);
+    if (g.step === 'reveal') {
+      const got = g.gained && g.gained[who];
+      return (got ? '<strong class="gain">+' + got + '</strong> for you' : haveAnswered ? 'No points this time' : 'You didn’t answer')
+        + ' · next question in <span class="countdown" id="qLeft">' + fmtSecs(left) + '</span>';
+    }
+    const online = list.filter((p) => isOnline(p, t));
+    const done = online.filter((p) => p.ansR === g.round).length;
+    return '<span class="countdown' + (left < 5000 ? ' low' : '') + '" id="qLeft">' + fmtSecs(left) + '</span> seconds · '
+      + done + ' of ' + online.length + ' answered';
+  },
+  refresh(r, who, list, t) {
+    const stage = $('trivStage');
+    if (!stage || stage.getAttribute('data-key') !== GAMES.trivia.key(r, who, list)) return false;
+    const el = stage.querySelector('[data-part="meter"]');
+    const html = GAMES.trivia.meter(r, who, list, t);
+    if (el && el.innerHTML !== html) el.innerHTML = html;
+    return true;
   },
   tick(r, t) {
     const el = $('qLeft');
@@ -2382,7 +2480,7 @@ GAMES.trivia = {
     if (myPick.round === r.game.round) return;
     myPick = { round: r.game.round, v: enc };
     noteWrite();
-    answerGame(r.game.round, enc).catch((e) => { console.warn('answer', e); myPick = { round: 0, v: null }; toast(describeCloudError(e)); });
+    answerGame(r.game.round, enc).catch((e) => { console.warn('answer', e); myPick = { round: 0, v: null }; toast(describeCloudError(e)); render(); });
     render();
   },
   results(r, who, list) {
@@ -2594,6 +2692,7 @@ function hintPositions(word) {
   for (let k = 0; pick.length < n && at.length; k++) pick.push(at.splice(rnd[k % 4] % at.length, 1)[0]);
   return pick.sort((a, b) => a - b);
 }
+const DRAW_PASS = 'pass';   /* the drawer's answer for Pass My Turn */
 function encodePick(word, g, positions) {
   const pos = positions || hintPositions(word);
   return 'P|' + hashWord(g.seed, g.round, word) + '|' + wordShape(word) + '|' + pos.map((p) => p + word[p]).join(',');
@@ -2803,6 +2902,9 @@ GAMES.draw = {
        than run a clock nobody is drawing against. Points already won stay. */
     if ((g.step === 'pick' || g.step === 'draw') && !ctx.players.some((p) => p.uid === g.drawer && isOnline(p, t)))
       return GAMES.draw.advance(r, ctx, [{ t: 'info', uid: g.drawer, text: 'left the game' }]);
+    /* The drawer pressed Pass My Turn. Points already won this turn stay. */
+    if ((g.step === 'pick' || g.step === 'draw') && fromDrawer && fromDrawer.v === DRAW_PASS)
+      return GAMES.draw.advance(r, ctx, [{ t: 'info', uid: g.drawer, text: 'passed their turn' }]);
     if (g.step === 'pick') {
       if (picked) {
         return { game: Object.assign({}, g, { step: 'draw', stepAt: 'now', stepMs: g.secs * 1000, wordHash: picked.hash,
@@ -2822,7 +2924,7 @@ GAMES.draw = {
         seen[a.uid] = q.n; changed = true;
         if (a.uid in got) return;
         if (guessMatches(g.seed, g.round, g.wordHash, q.text)) {
-          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - (a.at - g.stepAt)));
+          const remaining = Math.max(0, Math.min(g.stepMs, g.stepMs - stepElapsed(g, a.at)));
           const pts = 100 + Math.floor(100 * remaining / g.stepMs);
           got[a.uid] = pts;
           scores[a.uid] = (scores[a.uid] || 0) + pts;
@@ -2923,6 +3025,11 @@ GAMES.draw = {
         + '<input type="text" id="guessBox" maxlength="' + GUESS_MAX + '" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type a guess and press Enter">'
         + '<button type="button" class="primary" id="guessBtn">Guess</button></div>';
     }
+    /* Drawing needs a pointer; leaving the turn must not (WCAG 2.1.1, the
+       2026-10-27 review) — a keyboard-only drawer otherwise sat out a dead
+       minute or had to quit the whole game. */
+    if (amDrawer && (g.step === 'pick' || g.step === 'draw'))
+      below += '<p class="pass-row"><button type="button" class="btn-small" id="drawPassBtn">Pass My Turn</button></p>';
     return '<div class="card" id="drawStage" data-key="' + esc(GAMES.draw.key(r, who)) + '">'
       + '<h2 data-part="head">' + p.head + '</h2>'
       + '<div class="meter"><span data-part="meter">' + p.meter + '</span></div>'
@@ -2962,6 +3069,7 @@ GAMES.draw = {
     const w = btn.getAttribute('data-word');
     if (w !== null) { if (g.step === 'pick' && g.drawer === who && choicesFor(g, who).indexOf(w) !== -1) pickWord(r, w); return; }
     if (btn.id === 'guessBtn') { sendGuess(r, who); return; }
+    if (btn.id === 'drawPassBtn') { passTurn(r, who); return; }
     if (btn.id === 'clearCanvasBtn') { padClear(); return; }
     const c = btn.getAttribute('data-colour'), wd = btn.getAttribute('data-width');
     if (c !== null || wd !== null) {
@@ -3007,6 +3115,13 @@ function pickWord(r, word) {
   tr.clearStrokes(g.round).catch((e) => console.warn('clear', e));
   tr.answer(g.round, encodePick(word, g)).catch((e) => { console.warn('pick', e); myDraw = { round: 0, word: '' }; toast(describeCloudError(e)); });
   render();
+}
+function passTurn(r, who) {
+  const g = r.game;
+  if (g.drawer !== who || (g.step !== 'pick' && g.step !== 'draw')) return;
+  myDraw = { round: g.round, word: myDraw.round === g.round ? myDraw.word : '' };   /* no auto-pick after this */
+  noteWrite();
+  answerGame(g.round, DRAW_PASS).catch((e) => { console.warn('pass turn', e); toast(describeCloudError(e)); });
 }
 function sendGuess(r, who) {
   const g = r.game;
@@ -3056,7 +3171,7 @@ function padMount(r, who) {
   padSync(r);
   const g = r.game;
   c.classList.toggle('live', g.step === 'draw' && g.drawer === who);
-  c.setAttribute('aria-label', g.step === 'draw' && g.drawer === who ? 'Your canvas — draw here'
+  c.setAttribute('aria-label', g.step === 'draw' && g.drawer === who ? 'Your canvas — draw here with a mouse, finger or pen, or press Pass My Turn'
     : g.step === 'pick' ? 'The canvas, empty while a word is chosen' : 'The drawing by ' + nickOf(g.drawer));
   padResize();
 }
@@ -3491,14 +3606,14 @@ GAMES.ice = {
     }
     return GAMES.ice.nextPrompt(r, ctx, '');
   },
-  /* A new prompt clears the cards, and results clear them AND the key: the
-     text people wrote leaves the cloud with the prompt it answered. */
   /* Ended early by the host: the cards and the key leave the cloud, as at
      the natural end. */
   end(r) {
     return { phase: 'results', _key: { n: '', a: [], l: [] },
              game: Object.assign({}, r.game, GAMES.ice.blank(), { step: 'results', stepAt: 'now', stepMs: 0 }) };
   },
+  /* A new prompt clears the cards, and results clear them AND the key: the
+     text people wrote leaves the cloud with the prompt it answered. */
   nextPrompt(r, ctx, note) {
     const g = r.game;
     const feed = note ? r.feed.concat([{ t: 'info', uid: r.host, text: note }]).slice(-FEED_MAX) : r.feed;
@@ -3590,8 +3705,8 @@ GAMES.ice = {
         + g.authors.filter((u) => u !== who).map((u) => {
             const p = players.find((x) => x.uid === u) || { nick: 'Someone', hue: 0 };
             return '<button type="button" data-ice-pick="' + esc(u) + '" class="' + (picked === u ? 'mine' : '') + '"' + (sent ? ' disabled' : '')
-              + ' aria-label="' + esc(p.nick + (picked === u ? ', your guess' : '')) + '"><span class="ice-who">' + avatarHtml(p) + esc(p.nick) + '</span>'
-              + (picked === u ? '<span class="tag">your guess</span>' : '') + '</button>';
+              + '><span class="ice-who">' + avatarHtml(p) + esc(p.nick) + '</span>'
+              + (picked === u ? '<span class="sr-only">, </span><span class="tag">your guess</span>' : '') + '</button>';
           }).join('') + '</div>';
     }
     if (g.mode === 'twoTruths') {
@@ -3606,7 +3721,7 @@ GAMES.ice = {
           if (g.counts) tag = (tag ? tag + ' · ' : '') + g.counts[i] + (g.counts[i] === 1 ? ' pick' : ' picks');
         } else if (picked === i) { cls = 'mine'; tag = 'your pick'; }
         return '<button type="button" data-ice-pick="' + i + '" class="' + cls + '"' + (reveal || sent || mine ? ' disabled' : '')
-          + ' aria-label="' + esc(s + (tag ? ', ' + tag : '')) + '"><span>' + esc(s) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+          + '><span>' + esc(s) + '</span>' + (tag ? '<span class="sr-only">, </span><span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
       }).join('') + '</div>';
       return title + (mine && !reveal ? '<p class="hint">These are yours — watch them squirm.</p>' : !reveal ? '<p class="hint">Which one is the lie?</p>' : '') + list + gains;
     }
@@ -3627,7 +3742,7 @@ GAMES.ice = {
           } else if (own) tag = 'yours';
           else if (picked === i) { cls = 'mine'; tag = 'your vote'; }
           return '<button type="button" data-ice-pick="' + i + '" class="' + cls + '"' + (reveal || sent || own ? ' disabled' : '')
-            + ' aria-label="' + esc(c.t + (tag ? ', ' + tag : '')) + '"><span>' + esc(c.t) + '</span>' + (tag ? '<span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
+            + '><span>' + esc(c.t) + '</span>' + (tag ? '<span class="sr-only">, </span><span class="tag">' + esc(tag) + '</span>' : '') + '</button>';
         }).join('') + '</div>' + gains;
   },
   refresh(r, who, list, t) {
@@ -3983,13 +4098,13 @@ GAMES.codenames = {
              game: Object.assign({}, g, { step: 'clue', stepAt: 'now', stepMs: g.clueMs, round: g.round + 1,
                                           turn: cnOther(g.turn), clue: null, left: 0, made: 0 }) };
   },
-  /* The end: every player on the winning team scores, the whole key goes on
-     the room so everyone sees the board they played, and the key document is
-     emptied. */
   /* Ended early by the host: no winner, the board shown, the key emptied. */
   end(r, key) {
     return GAMES.codenames.finish(r, r.game, cnKeyFor(r.game, key), null, 'ended', r.feed);
   },
+  /* The end: every player on the winning team scores, the whole key goes on
+     the room so everyone sees the board they played, and the key document is
+     emptied. */
   finish(r, g, key, winner, why, feed) {
     const scores = Object.assign({}, r.scores), gained = {};
     if (winner) Object.keys(g.teams).filter((u) => g.teams[u] === winner).forEach((u) => { gained[u] = CN_WIN_PTS; scores[u] = (scores[u] || 0) + CN_WIN_PTS; });
@@ -4130,7 +4245,7 @@ GAMES.codenames = {
     if (btn.id === 'cnShuffleBtn' || btn.id === 'cnBeginBtn') {
       if (!iAmHost() || g.step !== 'teams') return;
       if (btn.id === 'cnShuffleBtn') {
-        const split = cnTeams(players, now());
+        const split = cnTeams(playing(), now());   /* never seat a quitter */
         if (Object.keys(split.teams).length < CN_MIN) { toast('Codenames needs four people online'); return; }
         pushPatch({ game: Object.assign({}, g, { teams: split.teams, spy: split.spy, spies: cnSpies(me, split.spy) }) });
       } else {
@@ -4202,6 +4317,51 @@ function render() {
   document.getElementById('inviteBtn').hidden = !inRoom;
   if (inRoom) renderRoom(); else renderHome();
   keep();
+  announceGame();
+}
+
+/* WHAT JUST HAPPENED, said once (the 2026-10-27 review). A sighted player
+   sees a new question, a reveal, a turn change or a pause; a screen-reader
+   user heard nothing. So whenever the view's identity changes — a game
+   stage's data-key (question, step, turn, "have I answered"), the phase, or
+   pause — its heading and meter line are written to #gameNews. Never per
+   tick: the countdown changes text, not identity. If focus has just landed
+   on the heading, the heading is not repeated. */
+let lastNews = '';
+function announceGame() {
+  const out = $('gameNews');
+  if (!out) return;
+  if (!room) { lastNews = ''; return; }
+  const main = $('roomView').querySelector('.mainc');
+  if (!main) return;
+  const stage = main.querySelector('[id$="Stage"][data-key]');
+  const paused = room.phase === 'play' && !!room.game.pausedAt;
+  const key = [room.code, room.phase, room.kind, stage ? stage.getAttribute('data-key') : '', paused ? 'p' : ''].join('|');
+  if (key === lastNews) return;
+  const first = !lastNews;
+  lastNews = key;
+  if (first) return;   /* arriving in a room: the focused heading says it */
+  const h = main.querySelector('h2');
+  const meter = main.querySelector('[data-part="meter"]');
+  const note = $('overdueSlot');
+  const parts = [];
+  if (paused && note) parts.push(spokenText(note));
+  if (h && document.activeElement !== h) parts.push(spokenText(h));
+  if (meter) parts.push(spokenText(meter));
+  out.textContent = parts.filter(Boolean).map((x) => x.replace(/[.\s]+$/, '')).join('. ');
+}
+/* What a screen reader would say for an element: its text nodes with a space
+   between spans ("Question 1 of 20 General Knowledge", not "…20General…"),
+   leaving out anything aria-hidden (the ⏸ glyph). */
+function spokenText(el) {
+  const bits = [];
+  (function walk(n) {
+    if (n.nodeType === 3) { bits.push(n.nodeValue); return; }
+    if (n.nodeType !== 1 || n.getAttribute('aria-hidden') === 'true') return;
+    n.childNodes.forEach(walk);
+    if (n !== el) bits.push(' ');
+  })(el);
+  return bits.join('').replace(/\s+/g, ' ').replace(/\s+([.,])/g, '$1').trim();
 }
 
 /* The home card's live parts: the nickname box is filled from storage only
@@ -4211,7 +4371,7 @@ function renderHome() {
   const nick = document.getElementById('nickBox');
   if (document.activeElement !== nick && !nick.value) nick.value = local.nick;
   const wrap = document.getElementById('recentWrap');
-  wrap.innerHTML = local.recent.map((r) =>
+  wrap.innerHTML = (local.recent.length ? '<span class="hint">Rooms you were in:</span> ' : '') + local.recent.map((r) =>
     '<button type="button" class="btn-small" data-rejoin="' + esc(r.code) + '" title="Join room '
     + esc(r.code) + ' again">' + esc(r.code) + '</button>').join('');
   const cloud = cloudOn();
@@ -4231,7 +4391,6 @@ function renderHome() {
    mid-choice and a text box mid-word — are read back before the redraw
    (`pickState()`) and have no text box at all (the picker is selects). */
 
-const PLAYER_BY = () => { const m = {}; players.forEach((p) => { m[p.uid] = p; }); return m; };
 function nickOf(uid) { const p = players.find((x) => x.uid === uid); return p ? p.nick : 'Someone'; }
 /* Two letters for the avatar, from words that START with a letter — so
    "Priya (online)" is PR, not P( . */
@@ -4286,11 +4445,7 @@ function renderRoster() {
 function canHandTo(p, t) {
   return !!room && iAmHost() && !demoOn && room.phase !== 'play' && !!p && p.uid !== me && isOnline(p, t);
 }
-/* The game's own buttons, on the room card so the drawing game's in-place
-   refresh (which redraws the side column) keeps them. The host pauses and
-   ends the game for everyone; ANY player — the host too — may quit it. At
-   the results a player's way out is back to the lobby; the host already
-   has the button that takes everyone there. */
+/* The clock the game views read: frozen at the pause while one stands. */
 function gameNow() {
   return room && room.phase === 'play' && room.game.pausedAt ? room.game.pausedAt : now();
 }
@@ -4302,11 +4457,16 @@ function sittingOut() {
   const p = players.find((x) => x.uid === me);
   return !!p && !inGame(p, room.game);
 }
+/* The game's own buttons, on the room card so the drawing game's in-place
+   refresh (which redraws the side column) keeps them. The host pauses and
+   ends the game for everyone; ANY player — the host too — may quit it. At
+   the results a player's way out is back to the lobby; the host already
+   has the button that takes everyone there. */
 function gameControls() {
   if (!room || room.phase === 'lobby') return '';
   const btns = [];
   if (room.phase === 'play' && iAmHost()) {
-    btns.push('<button type="button" id="pauseBtn">' + (room.game.pausedAt ? '▶ Resume' : '⏸ Pause') + '</button>');
+    btns.push('<button type="button" id="pauseBtn">' + (room.game.pausedAt ? '<span aria-hidden="true">▶ </span>Resume' : '<span aria-hidden="true">⏸ </span>Pause') + '</button>');
     btns.push('<button type="button" id="endGameBtn" class="danger">End Game for Everyone</button>');
   }
   if (!sittingOut() && room.game.gid && !(room.phase === 'results' && iAmHost())) {
@@ -4381,7 +4541,7 @@ function renderLobby() {
      either way — nothing a player chooses here is written anywhere. */
   {
     if (!kinds.length) {
-      picker = '<p class="lede">The games arrive with the next milestone. For now the room is a place to see who’s here.</p>';
+      picker = '<p class="lede">This copy of the app has no games to offer. The room is still a place to see who’s here.</p>';
     } else {
       const g = GAMES[pick.kind] || GAMES[kinds[0]];
       picker = '<div class="grid2">'
@@ -4397,7 +4557,7 @@ function renderLobby() {
             ? '<p class="hint" id="pickNote">The next game starts from the lobby, once this one is over.</p>'
             : '<p class="hint" id="pickNote">Only <strong>' + esc(nickOf(room.host)) + '</strong>, the host, can start a game — '
               + 'suggest one on the call, or ask to be made host.</p>')
-        + '<p class="warn-line" id="lobbyWarn" role="status"></p>';
+        + '<p class="warn-line" id="lobbyWarn" role="status">' + esc(lobbyError) + '</p>';
     }
   }
   if (room.phase !== 'lobby') {
@@ -4446,9 +4606,9 @@ function renderRoom() {
   const overdue = room.phase === 'play' && !paused && !iAmHost() && room.game.stepAt && room.game.stepMs
     && now() > room.game.stepAt + room.game.stepMs + HOST_OVERDUE_MS;
   const overdueHtml = paused
-    ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">⏸ Paused by <strong>' + esc(nickOf(room.host)) + '</strong> — the clock is stopped'
+    ? '<p class="warn-line" style="margin:0 0 var(--sp-5)"><span aria-hidden="true">⏸ </span>Paused by <strong>' + esc(nickOf(room.host)) + '</strong> — the clock is stopped'
         + (iAmHost() ? '. Press Resume on the room card to carry on.' : ' until the host carries on.') + '</p>'
-    : overdue ? '<p class="warn-line" role="status" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
+    : overdue ? '<p class="warn-line" style="margin:0 0 var(--sp-5)">Waiting for the host — <strong>'
         + esc(nickOf(room.host)) + '</strong>’s browser has not moved the game on. If they have gone, the room passes to the next player in three minutes.</p>' : '';
   const g = room.phase === 'play' && !out ? GAMES[room.kind] : null;
   /* A game that draws in parts (the drawing game: a canvas mid-stroke and a
@@ -4531,7 +4691,8 @@ function tickUI() {
 /* ═══════════════════════ Entering, leaving, the engine ═══════════════════ */
 
 /* The active transport: the demo's in-memory one, or the cloud module's.
-   Both answer the same thirteen calls, which is what lets every line below be
+   Both answer the same calls (the demo has no handHost: Make Host is never
+   offered there), which is what lets every line below be
    tested with neither Firebase nor a network. */
 let demoOn = false;
 function transport() { return demoOn ? demoSim : window.brCloud; }
@@ -4580,9 +4741,6 @@ function heartbeat() {
   transport().heartbeat().catch((e) => console.warn('heartbeat', e));
 }
 
-/* Out of a room. As the host with others online, the room is HANDED to the
-   next player first, so it never waits three minutes for a handoff it could
-   have had at once; as the last one out, the room is closed. */
 /* Pause and resume. The pause is the server's time on the game; resuming
    moves the step's start on by however long it stood, so every countdown
    picks up exactly where it stopped, on every screen. */
@@ -4591,7 +4749,7 @@ function togglePause() {
   const g = room.game;
   if (g.pausedAt) {
     const stood = Math.max(0, now() - g.pausedAt);
-    pushPatch({ game: Object.assign({}, g, { stepAt: g.stepAt ? g.stepAt + stood : g.stepAt, pausedAt: 0 }) })
+    pushPatch({ game: Object.assign({}, g, { stepAt: g.stepAt ? g.stepAt + stood : g.stepAt, pausedAt: 0, pz: pauseLog(g, now(), stood) }) })
       .then((ok) => { if (ok) toast('The clock is running again'); });
   } else {
     pushPatch({ game: Object.assign({}, g, { pausedAt: 'now' }) }).then((ok) => { if (ok) toast('Paused — the clock is stopped'); });
@@ -4628,6 +4786,9 @@ async function handHost(uid) {
   try { await transport().handHost(uid); toast(p.nick + ' is the host now'); }
   catch (e) { console.warn('hand host', e); toast(describeCloudError(e)); }
 }
+/* Out of a room. As the host with others online, the room is HANDED to the
+   next player first, so it never waits three minutes for a handoff it could
+   have had at once; as the last one out, the room is closed. */
 async function leaveRoom(reason, opts) {
   const t = transport();
   const code = local.code;
@@ -4649,7 +4810,7 @@ async function leaveRoom(reason, opts) {
   try { await t.leave({ handTo: handTo, closeRoom: closeRoom }); } catch (e) { console.warn('leave', e); }
   /* A closed house room is cleared from the house too (best effort — a
      guest host can't write the house, and openHouseRoom checks anyway). */
-  const h = closeRoom && !demoOn && room && room.house ? houses[room.house] : null;
+  const h = closeRoom && !demoOn && roomHouseId() ? houses[roomHouseId()] : null;
   if (h && me && h.members[me] && signedInHere() && window.brCloud.closeHouseRoom) {
     window.brCloud.closeHouseRoom(h.id, code).catch((e) => console.warn('close house room', e));
   }
@@ -4657,6 +4818,7 @@ async function leaveRoom(reason, opts) {
   const wasDemo = demoOn;
   room = null; players = []; answers = []; demoOn = false; strokesDoc = { seq: 0, segs: [] }; pad.round = -1;
   iceKey = null; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null };
+  myPick = { round: 0, v: null }; myDraw = { round: 0, word: '' }; myGuess = { round: 0, n: 0, at: 0 }; lobbyError = '';
   if (wasDemo) {
     delete houses[DEMO_HOUSE];
     const id = window.brCloud && window.brCloud.uid ? window.brCloud.uid() : null;
@@ -4682,7 +4844,11 @@ function hostTick() {
   if (!room || !me || !transport() || !transport().on) return;
   const t = now();
   if (!iAmHost()) {
-    if (hostIsStale(players, room.host, t) && nextHost(players, t) === me && Date.now() - claimAskedAt > 30000) {
+    /* The stale host is not a candidate here: between three and four minutes
+       silent they still count as online, and as the longest-present player
+       they would name THEMSELVES — the seat waited four minutes, not three. */
+    if (hostIsStale(players, room.host, t) && nextHost(players.filter((p) => p.uid !== room.host), t) === me
+        && Date.now() - claimAskedAt > 30000) {
       claimAskedAt = Date.now();
       noteWrite();
       transport().claimHost().then(() => toast('The host has gone quiet — you are running the room now'))
@@ -4707,6 +4873,14 @@ function hostTick() {
    map. The key is adopted here at once — a listener skips its own echo. */
 function pushPatch(patch) {
   if (pushInFlight) return Promise.resolve(false);
+  /* The last push's snapshot has not landed, so `room` is a step behind and a
+     patch built from it (Pause, End, Shuffle) would rewind the game — a pause
+     pressed just after a reveal rewound to the question and scored it again.
+     hostTick waits for the same thing. */
+  if (pendingRev && room && room.rev < pendingRev && Date.now() - pendingSince < 10000) {
+    toast('One moment — the room is catching up');
+    return Promise.resolve(false);
+  }
   pushInFlight = true;
   noteWrite();
   const body = Object.assign({}, patch);
@@ -4730,6 +4904,7 @@ function pushPatch(patch) {
    boundary normalized; nothing here is trusted until it has. */
 window.brApp = {
   schema: SCHEMA,
+  houseTag: houseTag,
   randomCode: randomCode,
   local: () => local,
   me: () => me,
@@ -4752,7 +4927,7 @@ window.brApp = {
     if (next.expiresAt <= now()) { leaveRoom('That room has ended'); return; }
     /* A new game starts its rounds from 1 again, so an answer remembered from
        the last game must not read as this game's. */
-    if (next.phase !== 'play' || !room || room.kind !== next.kind) { myPick = { round: 0, v: null }; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null }; }
+    if (next.phase !== 'play' || !room || room.kind !== next.kind) { myPick = { round: 0, v: null }; myIce = { round: 0, v: null, write: null }; myCn = { round: 0, v: null }; myDraw = { round: 0, word: '' }; myGuess = { round: 0, n: 0, at: 0 }; }
     /* The game is over and this browser drew the last picture: wipe it, so a
        drawing does not sit in the cloud after the game it belonged to. The
        room still names this browser as the drawer at results, which is what
@@ -4903,9 +5078,9 @@ const signedInHere = () => account.google && !!window.brCloud && !!window.brClou
    on screen (a member who opened a room by its code still counts it). */
 function watchWanted() {
   if (demoOn || !window.brCloud || !window.brCloud.watchHouses) return;
-  const ids = userDoc.houses.map((h) => h.id);
-  if (room && room.house && ids.indexOf(room.house) === -1) ids.push(room.house);
-  window.brCloud.watchHouses(ids);
+  /* Only the account's own houses: a room's tag names no code to listen to,
+     which is the point (a guest used to read the house here). */
+  window.brCloud.watchHouses(userDoc.houses.map((h) => h.id));
 }
 function rememberNick(nick) {
   if (demoOn || !signedInHere() || nick === userDoc.nick) return;
@@ -4941,7 +5116,7 @@ function renderHouses() {
 /* A line on the room card when the room belongs to a house. */
 function houseLine() {
   if (!room || !room.house) return '';
-  const h = houses[room.house];
+  const h = houses[roomHouseId()];
   if (!h) return '<p class="hint" style="margin:var(--sp-3) 0 0">Opened from a house — members’ scores count on its leaderboard.</p>';
   const mine = !!(me && h.members[me]);
   return '<p class="hint" style="margin:var(--sp-3) 0 0">Opened from the house <strong>' + esc(h.name) + '</strong>'
@@ -4956,8 +5131,13 @@ let tallyInFlight = false;
 function houseTick() {
   if (!room || !room.house || !me || tallyInFlight) return;
   if (!demoOn && !signedInHere()) return;
-  const h = houses[room.house];
+  const h = houses[roomHouseId()];
   if (!h || !h.members[me]) return;
+  /* Only a room a MEMBER is running counts: the host writes `scores`, and a
+     guest handed the seat (or one who claimed a stale one) could otherwise
+     write a billion points onto a member and have that member's own browser
+     carry them to the board — across the houses' Google-only boundary. */
+  if (!Object.hasOwn(h.members, room.host)) return;
   if (houseRecorder(players, room.host, h.members, now()) !== me) return;
   const code = local.code, scores = room.scores, exp = room.expiresAt;
   if (!houseTally(h, code, scores, exp)) return;
@@ -5011,13 +5191,18 @@ async function doJoinHouse(id) {
   } catch (e) { console.warn('join house', e); w.textContent = 'Could not join: ' + describeCloudError(e) + '.'; }
   finally { $('houseJoinBtn').disabled = false; }
 }
-/* Arriving by a house link: joined as soon as there is an account to join
-   with; until then the Houses card says what the link was for. */
+/* Arriving by a house link: the code is put in the Join box as soon as there
+   is an account to join with, and the PRESS is the person's (the 2026-10-27
+   security review: a link posted anywhere silently added every signed-in
+   visitor to the house, and the house to their list). Until then the Houses
+   card says what the link was for. */
 function houseArrive() {
   if (!houseArrival || !signedInHere()) return;
   const id = houseArrival; houseArrival = null;
-  $('houseWarn').textContent = '';
-  doJoinHouse(id);
+  if (userDoc.houses.some((h) => h.id === id)) { $('houseWarn').textContent = ''; return; }
+  $('houseCode').value = id;
+  $('houseWarn').textContent = 'Press Join a House to join the house ' + id + '.';
+  $('houseJoinBtn').focus({ preventScroll: true });
 }
 async function doOpenHouse(id) {
   const nick = houseNick();
@@ -5397,6 +5582,7 @@ function opensOnFocus(el) {
    page. A dialog that genuinely wants the keyboard needs no special case: call
    openModal and then focus the field yourself. */
 function openModal(dlg) {
+  returnFocusOnClose(dlg, document.activeElement);
   dlg.showModal();
   if (!matchMedia('(pointer: coarse)').matches) return;
   const el = document.activeElement;
@@ -5404,6 +5590,29 @@ function openModal(dlg) {
   if (!opensOnFocus(el)) return;
   dlg.tabIndex = -1;
   dlg.focus();
+}
+
+/* FOCUS COMES BACK to what opened the window (the 2026-10-27 review). The
+   browser returns it to the opener NODE — but the room redraws behind an open
+   dialog, so a window opened from inside #roomView (Invite, a help dot, the
+   pack editor) closed onto a button that no longer existed, and focus fell to
+   <body>. So the opener is remembered by WHAT it is (focusKey, as a redraw
+   does) and found again. Watched with a MutationObserver on `open`, not the
+   `close` event, which the family's harness cannot see. */
+function returnFocusOnClose(dlg, opener) {
+  const zone = opener && ['roomView', 'homeCard', 'houseCard'].find((z) => $(z) && $(z).contains(opener));
+  if (!zone) return;
+  const key = focusKey(opener);
+  const mo = new MutationObserver(() => {
+    if (dlg.open) return;
+    mo.disconnect();
+    const a = document.activeElement;
+    if (a && a !== document.body && a.isConnected && !dlg.contains(a)) return;
+    const again = key ? document.querySelector(key) : null;
+    if (again && !again.disabled && again.offsetParent !== null) { again.focus({ preventScroll: true }); return; }
+    landOn(room ? $('roomView').querySelector('.mainc h2') : $('homeCard').querySelector('h2'));
+  });
+  mo.observe(dlg, { attributes: true, attributeFilter: ['open'] });
 }
 
 /* Every dialog closes on a click outside it. Hit-tests against the dialog's BOX
@@ -5595,20 +5804,26 @@ function cloudOn() {
    CODE as well as by maxlength — a paste ignores the attribute. */
 function readNick() {
   const nick = $('nickBox').value.trim().slice(0, NICK_MAX);
-  if (!nick) { $('homeWarn').textContent = 'Pick a nickname first.'; $('nickBox').focus(); return null; }
-  $('homeWarn').textContent = '';
+  if (!nick) { homeFieldError('nickBox', 'Pick a nickname first.'); return null; }
+  homeFieldError('nickBox', '');
   if (nick !== local.nick) { local.nick = nick; save(); }
   return nick;
 }
 function readCode() {
   const code = cleanCode($('joinCode').value);
   if (!CODE_RE.test(code)) {
-    $('homeWarn').textContent = 'A room code is six letters or numbers, like 7KQ4M2 — no O, 0, I or 1.';
-    $('joinCode').focus();
+    homeFieldError('joinCode', 'A room code is six letters or numbers, like 7KQ4M2 — no O, 0, I or 1.');
     return null;
   }
-  $('homeWarn').textContent = '';
+  homeFieldError('joinCode', '');
   return code;
+}
+/* A home-card error names its box: aria-invalid on the field, which already
+   points at #homeWarn with aria-describedby, and focus goes to it. */
+function homeFieldError(id, msg) {
+  ['nickBox', 'joinCode'].forEach((f) => { if (f === id || !msg) $(f).removeAttribute('aria-invalid'); });
+  $('homeWarn').textContent = msg;
+  if (msg) { $(id).setAttribute('aria-invalid', 'true'); $(id).focus(); }
 }
 $('createBtn').addEventListener('click', () => { const n = readNick(); if (n) doCreate(n); });
 $('joinBtn').addEventListener('click', () => { const n = readNick(); const c = n && readCode(); if (n && c) doJoin(c, n, false); });
@@ -5718,12 +5933,17 @@ $('roomView').addEventListener('keydown', (e) => {
   }
 });
 
+/* Why Start refused, kept until the next Start: the lobby is redrawn on every
+   snapshot, and writing the reason only into the current markup lost it
+   within seconds (the 2026-10-27 review). */
+let lobbyError = '';
 function startGame() {
   pickState();
   const g = GAMES[pick.kind];
   if (!g || !iAmHost()) return;
   const built = g.setup(pick, players, local, now(), me);
-  if (built.error) { const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
+  if (built.error) { lobbyError = built.error; render(); const w = $('lobbyWarn'); if (w) w.textContent = built.error; return; }
+  lobbyError = '';
   /* A game with a key (Codenames) has it written before the room, like a
      deal's: pushPatch takes `_key` off and writes it first. */
   const patch = { phase: 'play', kind: g.id, game: Object.assign({}, built.game, { gid: 1 + Math.floor(Math.random() * (GID_MAX - 1)), pausedAt: 0 }),
@@ -6034,6 +6254,8 @@ window.__brTestHooks = {
   __plantUserDoc: (raw) => { userDoc = normalizeUserDoc(raw); render(); },
   __plantHouse: (id, raw) => { houses[id] = raw ? normalizeHouse(raw, id) : null; render(); },
   __houses: () => houses, openHouse: openHouse, houseTick: houseTick,
+  __resetPush: () => { pendingRev = 0; pendingSince = 0; pushInFlight = false; claimAskedAt = 0; },
+  __lobbyError: () => lobbyError,
   CN_WORDS: CN_WORDS, CN_CARDS: CN_CARDS, CN_MIN: CN_MIN, CN_WIN_PTS: CN_WIN_PTS, CN_KEY_WAIT_MS: CN_KEY_WAIT_MS, CN_CLUE_MAX: CN_CLUE_MAX,
   cnTeams: cnTeams, cnDeal: cnDeal, cnLeft: cnLeft, cnSpies: cnSpies, cnCleanClue: cnCleanClue, cnClueClash: cnClueClash,
   cnParseClue: cnParseClue, cnPickValid: cnPickValid, DEMO_CN_CLUES: DEMO_CN_CLUES, fmtClock: fmtClock,
@@ -6048,8 +6270,8 @@ window.__brTestHooks = {
    player's browser listens to. The shape is League Night's module — the
    dynamic import() of the SDK, initializeAuth with the three persistences,
    listenTo/stopListening with the hasPendingWrites skip, every room write a
-   transaction with rev + 1 — with Google sign-in taken out and the host loop's
-   needs put in. The classic script above never touches Firebase: it hands
+   transaction with rev + 1 — with the host loop's needs put in, and Google
+   sign-in kept only for houses (M6), LINKED onto the anonymous uid. The classic script above never touches Firebase: it hands
    patches here through `window.brCloud` and gets snapshots back through
    `window.brApp`, which is what lets the suite drive the whole app without
    loading a byte of this.
@@ -6482,7 +6704,10 @@ async function openHouseRoom(id, nick) {
      its last player (or one the house never heard had ended) is STALE, and
      a new room replaces it instead of sending everyone to "has ended". */
   let stale = null;
-  if (d.room && Number(d.roomExp) > Date.now()) {
+  /* Asked whatever roomExp says: an Extend nobody carried to the house left
+     a live room with a past roomExp, and a second room beside it counted the
+     night twice on the board. */
+  if (d.room) {
     if (await roomAlive(d.room)) return { code: d.room, created: false };
     stale = d.room;
   }
@@ -6644,7 +6869,7 @@ function listenTo(code) {
   }, onListenError));
 }
 
-/* ── The thirteen calls ─────────────────────────────────────────────────────── */
+/* ── The calls the classic script makes ────────────────────────────────────── */
 function needUser() { if (!user) throw Object.assign(new Error('not signed in'), { code: 'unauthenticated' }); }
 function playerDoc(nick, joinedAt, hue) {
   sentAt = Date.now();
@@ -6666,7 +6891,7 @@ async function create(nick, house) {
          under every version of the rules. */
       const doc = { host: user.uid, rev: 0, schema: window.brApp.schema, createdAt: t,
         expiresAt: ts(roomExpiresMs), phase: 'lobby', kind: null, game: {}, scores: {}, feed: [] };
-      if (house) doc.house = house;
+      if (house) doc.house = window.brApp.houseTag(house);
       await F.setDoc(roomRef(code), doc);
       break;
     } catch (e) {
@@ -6693,7 +6918,7 @@ async function join(code, nick) {
   roster.forEach((d) => { count++; if (d.id === user.uid) mine = d.data(); else taken.add(String(d.data().nick || '').toLowerCase()); });
   if (!mine && count >= 32) return 'full';
   let name = nick, n = 2;
-  while (taken.has(name.toLowerCase())) { name = nick.slice(0, 18) + ' ' + n; n++; }
+  while (taken.has(name.toLowerCase())) { name = nick.slice(0, NICK_MAX - (' ' + n).length) + ' ' + n; n++; }
   await F.setDoc(playerRef(code, user.uid), playerDoc(name, mine ? Number(mine.joinedAt) || Date.now() : Date.now(),
     mine ? Number(mine.hue) || 0 : Math.floor(Math.random() * 12)));
   return 'joined';

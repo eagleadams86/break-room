@@ -17,6 +17,27 @@ decides that the rest of the family has not.
 
 ## What It Does Today
 
+**A full review (27 October 2026)** — security, game logic, accessibility, tests and docs,
+and everything it found is fixed:
+- *Fairer games.* A pause no longer hands out the full speed bonus to answers given before
+  it. A drawer who drew in the last game is no longer locked out of picking a word in the
+  next. Pressing Pause, Resume or End just as the game moves on waits a moment instead of
+  rewinding the question and scoring it twice. When the host goes quiet, the room passes
+  on at **three** minutes, as promised — it had been four.
+- *Houses.* A house room no longer shows its guests the house's code (the room carries a
+  one-way tag of it that only members' browsers can match). Only a room a **member** is
+  running counts on the leaderboard. A house invite link fills in the code and waits for
+  you to press **Join a House**, rather than joining on its own. A house can no longer get
+  two rooms for one night and count the evening twice.
+- *Easier for everyone.* Trivia updates the answer count in place, so a screen reader is no
+  longer thrown back to the question each time someone answers; a new question, a reveal, a
+  pause or a turn change is announced once. A wrong pick now says **wrong** in words and
+  has a dashed edge, not just a red one. The drawer has a **Pass My Turn** button, focus
+  comes back to the right button when a window closes, and error messages stay put and
+  name the box they are about.
+- *Tighter rules.* A room can no longer be kept open past twelve hours from when it was
+  started, and another tab joining or leaving a room no longer moves this one.
+
 **Accessibility and slow connections (27 October 2026).** Checked with axe on every screen
 in all four themes (no issues), and by keyboard alone through the lobby and a game: focus now
 stays on the answer or button you were on when the room updates, instead of jumping to the
@@ -62,7 +83,8 @@ group that meets again:
 - **Start a House** with a name, or **Join a House** with its **eight-letter code** (a
   room's is six, so the two are never confused) or its invite link
   (`…/break-room/#house=CODE`). Your houses follow your account to any browser.
-- **Open Tonight's Room** from a house: a normal room, labelled with the house. Every other
+- **Open Tonight's Room** from a house: a normal room, labelled with the house (by a
+  one-way tag, so a guest in the room cannot read the house's code from it). Every other
   member sees *Join Tonight's Room* on their Houses card. Two members pressing at once get
   one room, not two. When the last player leaves, the room closes and the house forgets
   it; if a house still names a room that has ended, pressing the button opens a fresh one
@@ -229,7 +251,7 @@ four-theme palette with Auto as the default, the one-line header, Back Up & Rest
 nickname and custom packs), *Forget This Browser*, the help dot, the toast, the offline
 worker, the install manifest, room codes from an alphabet with no O/0/I/1, the boundary
 allowlists for everything that arrives from another browser, `firestore.rules` argued
-clause by clause, and a suite with a floor (227 tests as of milestone 6).
+clause by clause, and a suite with a floor (263 tests as of the 27 October review).
 
 All six milestones of the plan are built.
 
@@ -267,7 +289,7 @@ place today.
    rules mistake in one app can never reach another), with Gemini and Google Analytics
    turned off. Add a *web app* to it and copy the `firebaseConfig` object into
    `FIREBASE_CONFIG`. *Done — `BreakRoom`, web app "Break Room (web)".*
-2. **Authentication → Sign-in method:** enable **Anonymous** and nothing else, with *auto
+2. **Authentication → Sign-in method:** enable **Anonymous** (Google is added in step 9), with *auto
    clean-up* on (anonymous accounts older than 30 days are deleted, which is also what keeps
    them off the usage quota). This is the opposite of League Night's instruction, on purpose
    — `CLAUDE.md` says why. *Done.*
@@ -364,8 +386,10 @@ frame, and the module returns early inside a frame.
   code can join again, so a house that must be closed to someone is a new house.
 - Everything rendered is escaped and every snapshot is sanitised at the boundary: a
   nickname, a question or an answer on your screen was typed in somebody else's browser.
-- Nicknames, questions and answers are the only free text, each capped in code. There is no
-  chat log, no notes field, and nothing from any work system.
+- The free text is short and capped in code: nicknames, house and pack names, trivia
+  questions and answers, drawing guesses, icebreaker answers and Codenames clues. Each lives
+  only as long as its room or house. There is no chat log, no notes field, and nothing from
+  any work system.
 - `privacy.html` says what is stored where and for how long, and is updated in the same
   commit as any change to it.
 
@@ -389,7 +413,10 @@ python3 -m http.server 8026
 ```
 
 Then open `http://localhost:8026/` for the app and `http://localhost:8026/tests.html` for
-the suite. 8026 is this repo's port in both `.claude/launch.json` and the home
+the suite. The suite refuses to run anywhere but localhost (on the live site it would be
+your real copy of the app). It ends with one line: **"All 263 tests pass"** is green; any
+other line names what failed. GitHub runs the same suite on every push (the `tests`
+workflow), and fails the push if it isn't green. 8026 is this repo's port in both `.claude/launch.json` and the home
 `~/.claude/launch.json`.
 
 ## Provenance

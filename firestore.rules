@@ -98,6 +98,13 @@ service cloud.firestore {
           // lobby, and never past twelve from NOW. Checked against the server's
           // clock, so a client cannot hand itself a room that lasts a week.
           && d.expiresAt is timestamp && d.expiresAt <= request.time + duration.value(12, 'h')
+          // ...and never past twelve from the room's BIRTH (2026-10-27
+          // review): without this a host could rewrite expiresAt every few
+          // hours and keep a room readable for ever. createdAt is the
+          // client's clock in ms, so it is pinned on create (within a day of
+          // the server's, for a badly set clock) and frozen on update.
+          && d.createdAt is int
+          && d.expiresAt <= timestamp.value(d.createdAt) + duration.value(12, 'h')
           && d.phase in ['lobby', 'play', 'results']
           && (d.kind == null || d.kind in ['trivia', 'draw', 'ice', 'codenames'])
           && d.game is map && d.scores is map && d.scores.size() <= 32
@@ -127,10 +134,13 @@ service cloud.firestore {
       // Anyone signed in may open a room, as its host, at rev 0. Bounded by
       // validRoom and everything the header of this file lists.
       allow create: if signedIn() && validRoom(request.resource.data)
-                    && request.resource.data.host == me() && request.resource.data.rev == 0;
+                    && request.resource.data.host == me() && request.resource.data.rev == 0
+                    && request.resource.data.createdAt > request.time.toMillis() - 86400000
+                    && request.resource.data.createdAt < request.time.toMillis() + 86400000;
       // Every update raises rev by exactly one, and is one of three things:
       allow update: if signedIn() && validRoom(request.resource.data)
                     && request.resource.data.rev == resource.data.rev + 1
+                    && request.resource.data.createdAt == resource.data.createdAt
                     && (
                          // (1) THE HOST, writing anything - the game engine runs in
                          //     the host's browser and this is its transaction. The

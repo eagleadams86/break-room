@@ -1,14 +1,11 @@
 # Runs tests.html on every push — the suite that pins Break Room's behaviour and
-# the family rules it exists to carry: the pack's palette and type, the Auto
-# default in all three places, the guards on saved data, Find, sorting, the
-# exports, and the offline shell's file list.
+# the family rules it carries: the pack's palette and type, the Auto default in
+# all three places, the guards on everything that arrives from another browser,
+# the four games' engines, and the offline shell's file list.
 #
 # There is no build step, so CI is exactly what a person does: serve the folder,
 # open the page in a real browser, read the summary line. The job fails if the
 # summary goes red or the page throws.
-#
-# This repo matters more than most for that: every new app in the family is
-# copied from it, so a fault here is a fault the next app is born with.
 #
 name: tests
 
