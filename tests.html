@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 263;
+const EXPECTED = 264;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -278,7 +278,9 @@ function define() {
     ok(booted, 'the app booted onto the home card with no room');
     eq(H.__local().nick, 'Ada', 'and the suite then planted its own local record');
     eq(H.__local().recent.length, 1, 'with one recent code');
-    ok(W.document.querySelector('#recentWrap [data-rejoin="ABCDEF"]'), 'so there is a recent-room button to read');
+    ok(!W.document.querySelector('#recentWrap [data-rejoin="ABCDEF"]'), 'a code the cloud has not called open is not shown');
+    H.__plantRecentOpen({ ABCDEF: true });
+    ok(W.document.querySelector('#recentWrap [data-rejoin="ABCDEF"]'), 'so once it has, there is a recent-room button to read');
     /* The promise this suite makes about the reader's own data — read off the
        app's source, not asserted against nothing. */
     const hook = (stripComments(APP_SRC).match(/__plantLocal: function[^\n]*/) || [''])[0];
@@ -484,6 +486,14 @@ function define() {
     eq(H.normalizeLocal({ code: 'ABC-DEF' }).code, 'ABCDEF', 'dashes stripped');
     eq(H.normalizeLocal({ code: 'ABCDE0' }).code, '', 'a 0 is not in the alphabet, so it is not a code');
     eq(H.normalizeLocal({ code: '<script>' }).code, '', 'junk is nothing');
+  });
+  t('the recent list shows only rooms still open, and drops ended ones for good', () => {
+    const v = H.peekVerdicts(['AAAAAA', 'BBBBBB', 'CCCCCC', 'DDDDDD'], ['open', 'ended', 'gone', 'unknown']);
+    eq(Object.keys(v.open).sort(), ['AAAAAA', 'DDDDDD'], 'open, and a read that failed (cannot tell), stay on show');
+    eq(v.gone, ['BBBBBB', 'CCCCCC'], 'ended and deleted rooms are dropped');
+    const src = stripComments(APP_SRC);
+    ok(/peek: peek/.test(src), 'the cloud contract carries peek');
+    ok(/forgetRecent\(code\)/.test(src), 'a join that finds the room over forgets the code');
   });
   t('the recent list is capped, de-duplicated and shape-checked', () => {
     const many = Array.from({ length: 9 }, (_, i) => ({ code: 'ABCDE' + 'ABCDEFGHJ'[i], at: i }));

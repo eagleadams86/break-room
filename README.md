@@ -227,6 +227,9 @@ follow:
 - **Start or join.** *Start a Room* opens a room with a six-letter code and makes you its
   host; *Join* takes a code. Your nickname is remembered, and a reload drops you straight
   back into the room you were in. A nickname somebody else is already wearing gets a digit.
+  *Rooms you were in* lists the last few codes you used — but only rooms that are still
+  open. The home card asks the cloud about each one (one read apiece, at most once a
+  minute) and drops a room that has ended or been deleted for good.
 - **Who's here.** A roster in arrival order with an online dot per player — green while
   that browser has written in the last four minutes, grey after — the host badged, you
   marked. Every player's browser writes a heartbeat every 90 seconds; any other write

@@ -4364,6 +4364,40 @@ function spokenText(el) {
   return bits.join('').replace(/\s+/g, ' ').replace(/\s+([.,])/g, '$1').trim();
 }
 
+/* "Rooms you were in" lists only rooms that are STILL OPEN. A code is shown
+   once the cloud has said so (one read per code, at most RECENT_MAX, and not
+   again for a minute); an ended or deleted room is dropped from the list for
+   good. A read that fails for any other reason — offline, say — shows the
+   code anyway, since the page cannot tell, and Join will say. Memory only:
+   `recentOpen` is what this visit has learned, never saved. */
+let recentOpen = {}, recentAt = 0, recentBusy = false;
+function checkRecent() {
+  if (recentBusy || demoOn || room || !me || !cloudOn() || !window.brCloud.peek) return;
+  if (Date.now() - recentAt < 60000) return;
+  const codes = local.recent.map((r) => r.code);
+  if (!codes.length) return;
+  recentBusy = true;
+  Promise.all(codes.map((c) => window.brCloud.peek(c).catch(() => 'unknown'))).then((res) => {
+    const v = peekVerdicts(codes, res);
+    recentOpen = v.open;
+    if (v.gone.length) { local.recent = local.recent.filter((r) => v.gone.indexOf(r.code) === -1); save(); }
+    recentAt = Date.now();
+  }).finally(() => { recentBusy = false; render(); });
+}
+/* Pure: which codes stay on show and which are dropped for good. Only the
+   two answers that MEAN over drop a code; anything else keeps it. */
+function peekVerdicts(codes, res) {
+  const open = {}, gone = [];
+  codes.forEach((c, i) => { if (res[i] === 'ended' || res[i] === 'gone') gone.push(c); else open[c] = true; });
+  return { open: open, gone: gone };
+}
+function forgetRecent(code) {
+  if (!local.recent.some((r) => r.code === code)) return;
+  local.recent = local.recent.filter((r) => r.code !== code);
+  delete recentOpen[code];
+  save();
+}
+
 /* The home card's live parts: the nickname box is filled from storage only
    while nobody is typing in it, the recent codes are buttons, and the no-cloud
    note shows when this copy has nothing behind it. */
@@ -4371,7 +4405,9 @@ function renderHome() {
   const nick = document.getElementById('nickBox');
   if (document.activeElement !== nick && !nick.value) nick.value = local.nick;
   const wrap = document.getElementById('recentWrap');
-  wrap.innerHTML = (local.recent.length ? '<span class="hint">Rooms you were in:</span> ' : '') + local.recent.map((r) =>
+  checkRecent();
+  const shown = local.recent.filter((r) => recentOpen[r.code]);
+  wrap.innerHTML = (shown.length ? '<span class="hint">Rooms you were in:</span> ' : '') + shown.map((r) =>
     '<button type="button" class="btn-small" data-rejoin="' + esc(r.code) + '" title="Join room '
     + esc(r.code) + ' again">' + esc(r.code) + '</button>').join('');
   const cloud = cloudOn();
@@ -4722,6 +4758,7 @@ function enterRoom(code) {
   if (!demoOn) {
     local.code = code;
     local.recent = [{ code: code, at: Date.now() }].concat(local.recent.filter((r) => r.code !== code)).slice(0, RECENT_MAX);
+    recentAt = 0;   /* back on the home card, look again: the room may end while we are in it */
     save();
   } else { local.code = code; }
   noteWrite();
@@ -5026,6 +5063,7 @@ async function doJoin(code, nick, quiet) {
     const r = await t.join(code, nick);
     if (r === 'joined') { enterRoom(code); rememberNick(nick); if (!quiet) toast('You’re in'); return; }
     if (local.code === code) { local.code = ''; save(); }
+    if (r === 'not-found' || r === 'expired') forgetRecent(code);
     $('homeWarn').textContent = r === 'not-found' ? 'No room has the code ' + code + ' — check it with whoever started it.'
       : r === 'expired' ? 'Room ' + code + ' has ended.'
       : r === 'full' ? 'Room ' + code + ' is full.'
@@ -6203,6 +6241,7 @@ boot();
 window.__brTestHooks = {
   __plantLocal: function (next) { local = normalizeLocal(next); render(); },
   __local: function () { return local; },
+  __plantRecentOpen: function (map) { recentOpen = Object.assign({}, map); render(); },
   __plantRoom: function (raw) { room = raw ? normalizeRoom(raw) : null; render(); },
   __plantPlayers: function (list) { players = normalizePlayers(list); render(); },
   __plantAnswers: function (list) { answers = normalizeAnswers(list); render(); },
@@ -6219,7 +6258,7 @@ window.__brTestHooks = {
   ROOM_MS: ROOM_MS, EXTEND_MS: EXTEND_MS, ROOM_MAX_MS: ROOM_MAX_MS, HEARTBEAT_MS: HEARTBEAT_MS,
   ONLINE_MS: ONLINE_MS, HOST_STALE_MS: HOST_STALE_MS, HOST_OVERDUE_MS: HOST_OVERDUE_MS,
   PHASES: PHASES, KINDS: KINDS, GAMES: GAMES,
-  blankLocal: blankLocal, normalizeLocal: normalizeLocal, normalizePack: normalizePack,
+  blankLocal: blankLocal, normalizeLocal: normalizeLocal, normalizePack: normalizePack, peekVerdicts: peekVerdicts,
   normalizeRoom: normalizeRoom, normalizePlayers: normalizePlayers, normalizeAnswers: normalizeAnswers,
   normalizeScores: normalizeScores, normalizeFeed: normalizeFeed, toMs: toMs, int: int, num: num,
   isOnline: isOnline, nextHost: nextHost, hostIsStale: hostIsStale,
@@ -6923,6 +6962,17 @@ async function join(code, nick) {
     mine ? Number(mine.hue) || 0 : Math.floor(Math.random() * 12)));
   return 'joined';
 }
+/* Whether a room is still open, for the home card's recent list: one read,
+   no write. The rules refuse a read of an expired room, so a refusal means
+   ended, exactly as join() reads it. */
+async function peek(code) {
+  needUser();
+  let snap;
+  try { snap = await F.getDoc(roomRef(code)); }
+  catch (e) { if (String(e && e.code).indexOf('permission-denied') !== -1) return 'ended'; throw e; }
+  if (!snap.exists()) return 'gone';
+  return (Number(plain(snap.data()).expiresAt) || 0) > Date.now() ? 'open' : 'ended';
+}
 /* The host's transaction: read, check the seat is still mine, write rev + 1. */
 async function push(patch) {
   needUser();
@@ -7021,7 +7071,7 @@ async function handHost(uid) {
 window.brCloud = {
   on: cloudOn,
   uid: () => (user ? user.uid : null),
-  create: create, join: join, push: push, answer: answer, heartbeat: heartbeat,
+  create: create, join: join, peek: peek, push: push, answer: answer, heartbeat: heartbeat,
   strokes: strokes, clearStrokes: clearStrokes, writeKey: writeKey,
   claimHost: claimHost, extend: extend, leave: leave, handHost: handHost, setOut: setOut,
   listen: listenTo, stop: stopListening,
