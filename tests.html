@@ -1089,7 +1089,7 @@ function define() {
     ok(/\.tile-help \{[^}]*border-radius: 50%;/.test(APP_SRC) && /\.tile-help \{[^}]*background: transparent;/.test(APP_SRC), 'an outlined circle, not a filled pill');
     ok(/\.tile-help \{[^}]*margin-left: 7px;/.test(APP_SRC), 'off the word it follows');
     ok(/\.tile-help::after \{ content: ''; position: absolute; inset: -5px; \}/.test(APP_SRC), 'a true 24px tap target');
-    ok(/\.tile-help:hover \{ background: var\(--surface-alt\); border-color: var\(--text-secondary\);/.test(APP_SRC), 'and the hover fills rather than borrowing --focus-border');
+    ok(/\.tile-help:hover \{ background: var\(--border-strong\); border-color: var\(--text-secondary\);/.test(APP_SRC), 'and the hover fills rather than borrowing --focus-border');
   });
   t('every dot draws an "i", never a "?"', () => {
     const bare = stripComments(APP_SRC);
