@@ -996,6 +996,33 @@ input:is([type="checkbox"], [type="radio"]) { flex: none; width: 1.25rem; height
   .scores tr.lead th, .scores tr.lead td { font-weight: var(--fw-semibold); }
   .gain { color: var(--ok); font-variant-numeric: tabular-nums; }
 
+  /* ── The content well (theme pack rule 21, 2026-10-31) ─────────────────────
+     A box of records set inside a card is ONE fill in every theme:
+     --surface-alt, edged --border at --radius-sm — the tiles' and buttons'
+     face. Here that is the scoreboard (on the room card and in the house
+     window, the same markup), the roster and the home card's house list.
+     Never --bg or a bare --surface: the pack's surfaces climb
+     bg < surface < surfaceAlt in Midnight and Dark but sit
+     surfaceAlt ≈ bg < surface in Light and Sepia, so either one is right in
+     one pair of themes and the odd one out in the other. The pack already
+     gates every text and status colour (the dot's --ok, the pills) at 4.5:1
+     on surfaceAlt, so nothing new needs measuring. Inside a well the heading
+     band and row hover are --surface — the old hover colour IS the well now,
+     so in the dark themes a hovered row goes a shade darker; restated under
+     the well so it out-ranks the global `tbody tr:hover`. Never --accent-bg
+     behind rows (muted text on it is 3.43:1 in Dark); no shadow (rule 14).
+     The two lists were ruled flush to the card's padding, so inside a box
+     their rows take side padding. A well is drawn only while it has rows.
+     Left bare: the Custom Packs list (a dialog's working list), the game
+     stages' own lists (the guess feed, gains, picks, the Codenames log) and
+     the Codenames team boxes, whose team-coloured edge is their meaning. */
+  :is(.table-scroll:has(> table.scores), #roomView .roster, #houseList:has(> li)) {
+    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-alt); }
+  :is(.table-scroll:has(> table.scores)) thead th { background: var(--surface); }
+  :is(.table-scroll:has(> table.scores)) tbody tr:hover { background: var(--surface); }
+  :is(.table-scroll:has(> table.scores)) tbody tr:last-child :is(th, td) { border-bottom: 0; }
+  :is(#roomView .roster, #houseList) li { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+
   /* ── The drawing game ──────────────────────────────────────────────────────
      The canvas is TRANSPARENT over --surface-alt, so the eraser can cut
      through to the theme and a theme change needs no repaint of the paper.

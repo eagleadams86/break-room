@@ -143,7 +143,7 @@ roomExp, board, last}`), the Houses card on the home screen, the house window (c
 leaderboard, members, Leave / Delete), `#house=` arrival, the room card's house line, and a
 demo house (`DEMXTEAM`) so the board is in the sample data. **Rules change** (users, houses,
 `google()` from the token's identities, `house` on `validRoom`) — must be re-pasted.
-**SCHEMA 7** (game `pz`, the pause log, from the review below; 6 was game `gid` + `pausedAt` + `early`; 5 a room's `house`). CSP = League Night's line exactly. `EXPECTED` 266 (227 at M6; +1 stale-room fix, +1 pasted-link fix,
+**SCHEMA 7** (game `pz`, the pause log, from the review below; 6 was game `gid` + `pausedAt` + `early`; 5 a room's `house`). CSP = League Night's line exactly. `EXPECTED` 267 (227 at M6; +1 content wells 2026-10-31; +1 stale-room fix, +1 pasted-link fix,
 +2 shared picker / Make Host, +7 quit/pause/end, +1 deleted-house, +2 a11y below, +22 the review, +2 later fixes, +1 the keyboard fix below). **A deleted house lingered on members' cards
 (fixed 2026-10-27):** `deleteHouse` can only edit the FOUNDER's `users` doc, so each member's
 `watchHouses` listener drops the house from its own list when the server (not the cache)
@@ -424,6 +424,19 @@ Firebase console steps are a numbered checklist in the README and need Charles.
   reading a dot. T0 is in 2027; without the offset every fixture player reads as online.
 - **A join link's code is read with a boundary on BOTH sides** — `(?:^|[^A-Z0-9])` before
   and `(?![A-Z0-9])` after — or `#join=ABCDEFG` reads as `BCDEFG`.
+
+## Content wells — theme pack rule 21 (2026-10-31)
+
+The scoreboard (`.table-scroll:has(> table.scores)` — the room card's Scores AND the house
+window's leaderboard, the same markup), the lobby roster (`#roomView .roster`) and the home
+card's house list (`#houseList:has(> li)`) are `--surface-alt` boxes on a `--border` edge at
+`--radius-sm`; the scoreboard's heading band and row hover are `--surface`, its last row loses
+its rule, and the two lists' rows take `--sp-4` side padding (they were ruled flush to the card).
+No cell here has its own background (`tr.lead` is bold only). **Left bare on purpose:** the
+Custom Packs list (`ul.roster` in a dialog — hence the `#roomView` scope), the game stages' own
+lists (draw feed, gains, icebreaker picks, Codenames log) and the Codenames team boxes, whose
+team-coloured edge is their meaning. No tabs here, so no other screen holds a table. Pinned by
+"Content wells" in four themes, against a `--surface-alt` probe (this app has no tiles).
 
 ## Editing rules
 

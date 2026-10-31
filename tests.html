@@ -51,7 +51,7 @@
    go MISSING look exactly like tests that pass — a suite that quietly shrank to
    three checks still says "all 3 tests pass". RAISE THIS when you add tests, and
    lower it only when you retire one deliberately. */
-const EXPECTED = 266;
+const EXPECTED = 267;
 
 /* ── It refuses to run anywhere but localhost, and that is load-bearing ──────
    GitHub Pages publishes this page BESIDE the app, where the iframe below would
@@ -2967,6 +2967,47 @@ function define() {
       ok(!D.querySelector('#houseBoard table'), 'an empty board is not a table of noughts');
       dlg.close();
     } finally { houseDone(); }
+  });
+  t('Content wells: the scoreboards, the roster and the house list are one fill in every theme (pack rule 21)', () => {
+    /* --surface-alt, never --bg (matches in Light, a step darker in the dark
+       themes) and never a bare --surface (matches in Midnight, the lightest
+       thing on the page in Light). The heading band is --surface. */
+    const D = W.document, el = D.documentElement, was = el.getAttribute('data-theme');
+    const bg = (e) => W.getComputedStyle(e).backgroundColor;
+    const probe = D.createElement('div');
+    probe.style.background = 'var(--surface-alt)';
+    D.body.appendChild(probe);
+    const THEMES = ['midnight', 'dark', 'light', 'sepia'];
+    const each = (read) => THEMES.map((th) => { el.setAttribute('data-theme', th); return read(); });
+    try {
+      H.__setOffset(T0 - Date.now()); H.__setMe(U.b);
+      H.__plantRoom(fixtureRoom({ phase: 'results', kind: 'trivia', scores: { [U.b]: 150 } }));
+      H.__plantPlayers(fixturePlayers());
+      const scores = D.querySelector('#roomView .card .table-scroll:has(> table.scores)');
+      const roster = D.querySelector('#roomView .roster');
+      ok(scores && roster, 'the results card draws a scoreboard and the roster');
+      const room = each(() => [bg(probe), bg(scores), bg(roster), bg(scores.querySelector('thead th'))]);
+      H.__plantRoom(null);
+      H.__setAccount({ google: true, name: 'Ada' });
+      H.__plantUserDoc({ nick: 'Ada', houses: [{ id: HID, name: 'Friday Quiz' }] });
+      H.__plantHouse(HID, fixtureHouse());
+      const list = D.getElementById('houseList');
+      ok(list.querySelector('li'), 'the home card lists a house');
+      const homeFills = each(() => bg(list));
+      H.openHouse(HID);
+      const board = D.querySelector('#houseBoard .table-scroll');
+      ok(board, 'the house window draws its board');
+      const dlg = each(() => [bg(board), bg(board.querySelector('thead th'))]);
+      D.getElementById('houseDialog').close();
+      THEMES.forEach((th, i) => {
+        const well = room[i][0];
+        eq([room[i][1], room[i][2], homeFills[i], dlg[i][0]], [well, well, well, well],
+           th + ': scoreboard, roster, house list and house board are all --surface-alt');
+        ok(room[i][3] !== well && dlg[i][1] !== well, th + ': the heading band stands apart from the well');
+      });
+      H.__plantHouse(HID, null); H.__plantUserDoc(null);
+      eq(bg(list), 'rgba(0, 0, 0, 0)', 'an empty house list draws no box');
+    } finally { probe.remove(); el.setAttribute('data-theme', was || 'auto'); houseDone(); }
   });
   t('a room opened from a house says so, and links a member to the board', () => {
     const D = W.document;
